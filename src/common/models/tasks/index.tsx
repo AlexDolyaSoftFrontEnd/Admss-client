@@ -1,5 +1,3 @@
-import { BaseResponseError } from "common/models/base-response";
-
 export enum TaskStatus {
     DEFAULT = "Default",
     STARTED = "Started",
@@ -12,6 +10,11 @@ export enum TaskStatus {
     DELETED = "Deleted",
 }
 
+export enum ALERT_TYPE {
+    INFO,
+    WARNING,
+    ERROR,
+}
 export interface Task {
     accountname: string;
     accountnumber: string;
@@ -45,14 +48,14 @@ export interface TaskUser {
     useruid: string;
 }
 
-export interface PostDataTask extends BaseResponseError {
+export interface PostDataTask {
     index: number;
     created: string;
     updated: string;
     startdate: string;
     deadline: string;
     statuscode: number;
-    task_status: TaskStatus;
+    status: TaskStatus;
     itemuid: string;
     parentuid: string;
     useruid: string;
@@ -80,4 +83,32 @@ export interface AdvancedSearch {
     [key: string]: string | number;
     info: string;
     date: string;
+}
+
+export interface News {
+    info: string;
+    index: number;
+    created: string;
+    updated: string;
+    deadline: string;
+    startdate: string;
+    newstype: number;
+    itemuid: string;
+    description: string;
+    objecttype: number;
+    read: boolean;
+    title: string;
+}
+
+export interface Alert {
+    accepted: string;
+    alerttype: number;
+    created: string;
+    deadline: string;
+    description: string;
+    index: number;
+    itemuid: string;
+    startdate: string;
+    updated: string;
+    useruid: string;
 }

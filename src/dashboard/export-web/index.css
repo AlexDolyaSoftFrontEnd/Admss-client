@@ -6,6 +6,26 @@
     border: none;
 }
 
+.export-web {
+    .column-picker {
+        height: 50px;
+    }
+    .expanded-row {
+        width: 100%;
+        display: flex;
+        column-gap: 45px;
+        .expanded-row__label {
+            font-weight: 700;
+            flex: 0 1 20%;
+            text-align: right;
+        }
+        .expanded-row__text {
+            flex: 0 1 80%;
+            text-wrap: wrap;
+        }
+    }
+}
+
 .export-web__body .p-datatable-wrapper {
     height: 62vh;
 }
@@ -81,23 +101,6 @@
     background: var(--admss-app-light-green);
 }
 
-.expanded-row {
-    width: 100%;
-    display: flex;
-    column-gap: 45px;
-}
-
-.expanded-row__label {
-    font-weight: 700;
-    flex: 0 1 20%;
-    text-align: right;
-}
-
-.expanded-row__text {
-    flex: 0 1 80%;
-    text-wrap: wrap;
-}
-
 .export-web .card-header {
     align-items: stretch;
 }
@@ -109,7 +112,7 @@
 
 .p-tabview .p-tabview-nav li.export-web__header .p-tabview-nav-link {
     font-weight: 700;
-    color: var(----admss-app-primary);
+    color: var(--admss-app-primary);
 }
 
 .p-tabview .p-tabview-nav li.export-web__header .p-tabview-nav-link {

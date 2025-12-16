@@ -9,6 +9,7 @@ import { InventoryMediaData } from "dashboard/inventory/form/media-data";
 import { useNavigate, useParams } from "react-router-dom";
 import { useStore } from "store/hooks";
 import { ConfirmModal } from "dashboard/common/dialog/confirm";
+import { useFormExitConfirmation, useToastMessage } from "common/hooks";
 import { checkStockNoAvailability, getVINCheck } from "http/services/inventory-service";
 import { InventoryExportWebData } from "dashboard/inventory/form/export-web";
 
@@ -24,12 +25,10 @@ import {
     Inventory as InventoryModel,
     InventoryStockNumber,
 } from "common/models/inventory";
-import { useToast } from "dashboard/common/toast";
 import { MAX_VIN_LENGTH, MIN_VIN_LENGTH } from "dashboard/common/form/vin-decoder";
 import { DeleteForm } from "dashboard/inventory/form/delete-form";
 import { BaseResponseError, Status } from "common/models/base-response";
 import { debounce } from "common/helpers";
-import { TOAST_LIFETIME } from "common/settings";
 import { PHONE_NUMBER_REGEX } from "common/constants/regex";
 import { INVENTORY_PAGE } from "common/constants/links";
 
@@ -111,7 +110,7 @@ export const InventoryForm = observer(() => {
     const location = useLocation();
     const searchParams = new URLSearchParams(location.search);
     const tabParam = searchParams.get(STEP) ? Number(searchParams.get(STEP)) - 1 : 0;
-    const toast = useToast();
+    const { showError, showSuccess } = useToastMessage();
 
     const [isInventoryWebExported, setIsInventoryWebExported] = useState(false);
     const [stepActiveIndex, setStepActiveIndex] = useState<number>(tabParam);
@@ -133,6 +132,7 @@ export const InventoryForm = observer(() => {
         inventory,
         inventoryExtData,
         isFormChanged,
+        isErasingNeeded,
         currentLocation,
         deleteReason,
         memoRoute,
@@ -147,8 +147,20 @@ export const InventoryForm = observer(() => {
     const [validateOnMount, setValidateOnMount] = useState<boolean>(false);
     const [errorSections, setErrorSections] = useState<string[]>([]);
     const [attemptedSubmit, setAttemptedSubmit] = useState<boolean>(false);
-    const [confirmAction, setConfirmAction] = useState<() => void>(() => () => {});
-    const [confirmQuitEditVisible, setConfirmQuitEditVisible] = useState<boolean>(false);
+    const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+    const { handleExitClick, ConfirmModalComponent } = useFormExitConfirmation({
+        isFormChanged,
+        onConfirmExit: () => {
+            if (memoRoute) {
+                navigate(memoRoute);
+                store.memoRoute = "";
+            } else {
+                navigate(INVENTORY_PAGE.MAIN);
+            }
+        },
+        className: "inventory-confirm-dialog",
+    });
 
     const initialVIN = useMemo(() => {
         if (inventory) {
@@ -203,6 +215,7 @@ export const InventoryForm = observer(() => {
     const InventoryFormSchema = ({
         debouncedCheckStockNoAvailability,
         debouncedCheckVINAvailability,
+        isSubmitting,
     }: {
         initialVIN?: string;
         initialStockNo?: string;
@@ -211,6 +224,7 @@ export const InventoryForm = observer(() => {
             resolve: (exists: boolean) => void
         ) => void;
         debouncedCheckVINAvailability: (value: string, resolve: (exists: boolean) => void) => void;
+        isSubmitting: boolean;
     }): Yup.ObjectSchema<Partial<PartialInventory>> => {
         return Yup.object().shape({
             VIN: Yup.string()
@@ -218,6 +232,9 @@ export const InventoryForm = observer(() => {
                 .min(MIN_VIN_LENGTH, `VIN must be at least ${MIN_VIN_LENGTH} characters`)
                 .max(MAX_VIN_LENGTH, `VIN must be less than ${MAX_VIN_LENGTH} characters`)
                 .test("is-vin-available", "VIN is already in use", function (value) {
+                    if (isSubmitting) {
+                        return true;
+                    }
                     return new Promise((resolve) => {
                         debouncedCheckVINAvailability(value || "", resolve);
                     });
@@ -250,6 +267,9 @@ export const InventoryForm = observer(() => {
                 .min(1, "Stock number must be at least 1 character")
                 .max(20, "Stock number must be at most 20 characters")
                 .test("is-stockno-available", "Stock number is already in use", function (value) {
+                    if (isSubmitting) {
+                        return true;
+                    }
                     return new Promise((resolve) => {
                         debouncedCheckStockNoAvailability(value || "", resolve);
                     });
@@ -298,12 +318,7 @@ export const InventoryForm = observer(() => {
         const response = await getInventory();
         const res = response as BaseResponseError;
         if (res?.status === Status.ERROR) {
-            toast.current?.show({
-                severity: "error",
-                summary: Status.ERROR,
-                detail: res?.error || "",
-                life: TOAST_LIFETIME,
-            });
+            showError(res?.error);
             navigate(INVENTORY_PAGE.MAIN);
         }
     };
@@ -323,7 +338,7 @@ export const InventoryForm = observer(() => {
         setPrintActiveIndex(itemsMenuCount + 1);
         setDeleteActiveIndex(itemsMenuCount + 2);
 
-        if (id && id !== CREATE_INVENTORY_ID) {
+        if (id && id !== CREATE_INVENTORY_ID && isErasingNeeded) {
             store.inventoryID = id;
             handleGetInventory();
         }
@@ -347,36 +362,6 @@ export const InventoryForm = observer(() => {
             }
         }
     }, [accordionSteps, stepActiveIndex]);
-
-    useEffect(() => {
-        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-            if (isFormChanged) {
-                event.preventDefault();
-            }
-        };
-        window.addEventListener("beforeunload", handleBeforeUnload);
-        return () => {
-            window.removeEventListener("beforeunload", handleBeforeUnload);
-        };
-    }, [isFormChanged]);
-
-    const handleCloseClick = () => {
-        const performNavigation = () => {
-            if (memoRoute) {
-                navigate(memoRoute);
-                store.memoRoute = "";
-            } else {
-                navigate(INVENTORY_PAGE.MAIN);
-            }
-        };
-
-        if (isFormChanged) {
-            setConfirmAction(() => performNavigation);
-            setConfirmQuitEditVisible(true);
-        } else {
-            performNavigation();
-        }
-    };
 
     const handleOnBackClick = () => {
         setStepActiveIndex((prev) => {
@@ -404,6 +389,7 @@ export const InventoryForm = observer(() => {
     };
 
     const handleSaveInventoryForm = () => {
+        setIsSubmitting(true);
         formikRef.current?.validateForm().then((errors) => {
             if (!Object.keys(errors).length) {
                 formikRef.current?.submitForm();
@@ -427,16 +413,9 @@ export const InventoryForm = observer(() => {
                 const firstErrorKey = Object.keys(errors)[0];
                 const firstErrorMessage = errors[firstErrorKey as keyof typeof errors];
 
-                toast.current?.show({
-                    severity: "error",
-                    summary: "Validation Error",
-                    detail:
-                        typeof firstErrorMessage === "string"
-                            ? firstErrorMessage
-                            : "Please fill in all required fields.",
-                    life: TOAST_LIFETIME,
-                });
+                showError(firstErrorMessage || "Please fill in all required fields.");
             }
+            setIsSubmitting(false);
         });
     };
 
@@ -451,11 +430,7 @@ export const InventoryForm = observer(() => {
     };
 
     const showToastMessage = () => {
-        toast.current?.show({
-            severity: "success",
-            summary: "Success",
-            detail: "Inventory saved successfully",
-        });
+        showSuccess("Inventory saved successfully");
     };
 
     const handleSubmit = async (id: string | undefined) => {
@@ -463,14 +438,14 @@ export const InventoryForm = observer(() => {
         const response = await saveInventory(id);
 
         if (response === Status.OK) {
+            setIsSubmitting(false);
             navigateAndClear();
             showToastMessage();
         } else {
-            toast.current?.show({
-                severity: "error",
-                summary: "Error",
-                detail: response,
-            });
+            setIsSubmitting(false);
+            const { error } = response as BaseResponseError;
+
+            showError(error);
         }
     };
 
@@ -480,7 +455,7 @@ export const InventoryForm = observer(() => {
                 <Button
                     icon='pi pi-times'
                     className='p-button close-button'
-                    onClick={handleCloseClick}
+                    onClick={handleExitClick}
                 />
                 <div className='col-12'>
                     <div className='card inventory'>
@@ -597,6 +572,7 @@ export const InventoryForm = observer(() => {
                                                 initialStockNo,
                                                 debouncedCheckStockNoAvailability,
                                                 debouncedCheckVINAvailability,
+                                                isSubmitting,
                                             })}
                                             initialValues={
                                                 {
@@ -721,22 +697,8 @@ export const InventoryForm = observer(() => {
                     </div>
                 </div>
             </div>
-            {confirmQuitEditVisible ? (
-                <ConfirmModal
-                    visible={!!confirmQuitEditVisible}
-                    position='top'
-                    title='Quit Editing?'
-                    icon='pi-exclamation-triangle'
-                    bodyMessage={DIALOG_MESSAGES.QUIT}
-                    confirmAction={confirmAction}
-                    draggable={false}
-                    rejectLabel='Cancel'
-                    acceptLabel='Confirm'
-                    resizable={false}
-                    className='contact-confirm-dialog'
-                    onHide={() => setConfirmQuitEditVisible(false)}
-                />
-            ) : (
+            <ConfirmModalComponent />
+            {confirmDeleteVisible && (
                 <ConfirmModal
                     visible={confirmDeleteVisible}
                     bodyMessage={DIALOG_MESSAGES.DELETE}

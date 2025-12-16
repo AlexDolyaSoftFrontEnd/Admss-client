@@ -19,7 +19,9 @@ import {
     UploadMediaItem,
     MediaItem,
 } from "common/models/inventory";
+import { UserGroup } from "common/models/user";
 import { getAccountPayment } from "http/services/accounts.service";
+import { getUserGroupList } from "http/services/auth-user.service";
 import {
     getInventoryInfo,
     setInventory,
@@ -29,6 +31,7 @@ import {
     setInventoryExportWeb,
     getInventoryWebCheck,
     setInventoryWebCheck,
+    updateInventoryWatermark,
 } from "http/services/inventory-service";
 import {
     getInventoryMediaItemList,
@@ -71,6 +74,7 @@ export class InventoryStore {
     private _inventoryPayments: AccountPayment = {} as AccountPayment;
     private _inventoryAudit: Audit = initialAuditState as Audit;
     private _inventoryGroupID: string = "";
+    private _inventoryGroupClassList: UserGroup[] = [];
 
     private _exportWebActive: boolean = false;
     private _exportWeb: InventoryWebInfo = {} as InventoryWebInfo;
@@ -127,7 +131,9 @@ export class InventoryStore {
     public get inventoryGroupID() {
         return this._inventoryGroupID;
     }
-
+    public get inventoryGroupClassList() {
+        return this._inventoryGroupClassList;
+    }
     public get inventoryExtData() {
         return this._inventoryExtData;
     }
@@ -266,6 +272,21 @@ export class InventoryStore {
         }
     };
 
+    public getInventoryGroupClassList = async (): Promise<BaseResponseError | undefined> => {
+        if (this._inventoryGroupClassList.length > 0) {
+            return;
+        }
+
+        try {
+            const response = await getUserGroupList(this.rootStore.userStore.authUser!.useruid);
+            if (response && Array.isArray(response)) {
+                this._inventoryGroupClassList = response;
+            }
+        } catch (error) {
+            return { status: Status.ERROR, error: error as string };
+        }
+    };
+
     private getInventoryMedia = async (): Promise<Status> => {
         try {
             const response = await getInventoryMediaItemList(this._inventoryID);
@@ -350,7 +371,7 @@ export class InventoryStore {
         try {
             const response = await getAccountPayment(id);
             if (response) {
-                this._inventoryPayments = response;
+                this._inventoryPayments = response as AccountPayment;
             }
         } catch (error) {}
     };
@@ -441,58 +462,97 @@ export class InventoryStore {
         }
     );
 
-    public saveInventory = action(async (inventoryuid: string = "0"): Promise<string> => {
-        try {
-            this._isLoading = true;
+    public saveInventory = action(
+        async (inventoryuid: string = "0"): Promise<string | BaseResponseError> => {
+            try {
+                this._isLoading = true;
 
-            const generalSettingsStore = this.rootStore.generalSettingsStore;
-            const useruid = this.rootStore.userStore.authUser?.useruid;
-            if (generalSettingsStore.isSettingsChanged) {
-                if (useruid) {
-                    generalSettingsStore.saveSettings();
+                const inventoryData: Inventory = {
+                    ...this.inventory,
+                    extdata: {
+                        ...this.inventoryExtData,
+                        fpReduxAmt: (this.inventoryExtData?.fpReduxAmt || 0) * 100,
+                        fpRemainBal: (this.inventoryExtData?.fpRemainBal || 0) * 100,
+                        csFee: (this.inventoryExtData?.csFee || 0) * 100,
+                        csReserveAmt: (this.inventoryExtData?.csReserveAmt || 0) * 100,
+                        csEarlyRemoval: (this.inventoryExtData?.csEarlyRemoval || 0) * 100,
+                        csListingFee: (this.inventoryExtData?.csListingFee || 0) * 100,
+                        csOwnerAskingPrice: (this.inventoryExtData?.csOwnerAskingPrice || 0) * 100,
+                        purPurchaseBuyerComm:
+                            (this.inventoryExtData?.purPurchaseBuyerComm || 0) * 100,
+                        purPurchaseAmount: (this.inventoryExtData?.purPurchaseAmount || 0) * 100,
+                    },
+                    options_info: this.inventoryOptions,
+                    Audit: this.inventoryAudit,
+                };
+
+                if (inventoryData.GroupClassName && !inventoryData.GroupClassId) {
+                    const activeGroup = this._inventoryGroupClassList.find(
+                        (group) => group.description === inventoryData.GroupClassName
+                    );
+                    if (activeGroup?.itemuid) {
+                        inventoryData.GroupClassId = activeGroup.itemuid;
+                    }
                 }
-                generalSettingsStore.isSettingsChanged = false;
-            }
 
-            const inventoryData: Inventory = {
-                ...this.inventory,
-                extdata: {
-                    ...this.inventoryExtData,
-                    fpReduxAmt: (this.inventoryExtData?.fpReduxAmt || 0) * 100,
-                    fpRemainBal: (this.inventoryExtData?.fpRemainBal || 0) * 100,
-                    csFee: (this.inventoryExtData?.csFee || 0) * 100,
-                    csReserveAmt: (this.inventoryExtData?.csReserveAmt || 0) * 100,
-                    csEarlyRemoval: (this.inventoryExtData?.csEarlyRemoval || 0) * 100,
-                    csListingFee: (this.inventoryExtData?.csListingFee || 0) * 100,
-                    csOwnerAskingPrice: (this.inventoryExtData?.csOwnerAskingPrice || 0) * 100,
-                    purPurchaseBuyerComm: (this.inventoryExtData?.purPurchaseBuyerComm || 0) * 100,
-                    purPurchaseAmount: (this.inventoryExtData?.purPurchaseAmount || 0) * 100,
-                },
-                options_info: this.inventoryOptions,
-                Audit: this.inventoryAudit,
-            };
+                const generalSettingsStore = this.rootStore.generalSettingsStore;
+                const watermarkPromise = generalSettingsStore.isSettingsChanged
+                    ? (async () => {
+                          const useruid = this.rootStore.userStore.authUser?.useruid;
+                          if (useruid) {
+                              const filteredSettings = Object.fromEntries(
+                                  Object.entries(generalSettingsStore.settings).filter(
+                                      ([key]) =>
+                                          !["index", "created", "updated", "status"].includes(key)
+                                  )
+                              );
 
-            const [inventoryResponse, webResponse] = await Promise.all([
-                setInventory(inventoryuid, inventoryData),
-                setInventoryExportWeb(inventoryuid, this._exportWeb),
-            ]);
+                              const response = await updateInventoryWatermark(
+                                  this._inventoryID,
+                                  filteredSettings
+                              );
+                              if (response?.status === Status.ERROR) {
+                                  return response;
+                              }
+                          }
+                          generalSettingsStore.isSettingsChanged = false;
+                          return { status: Status.OK };
+                      })()
+                    : Promise.resolve({ status: Status.OK });
 
-            if (inventoryResponse?.status === Status.OK && webResponse?.status === Status.OK) {
-                if (inventoryuid !== "0") {
-                    await setInventoryWebCheck(inventoryuid, {
-                        enabled: !!this._exportWebActive ? 1 : 0,
-                    });
+                const [inventoryResponse, webResponse, watermarkResponse] = await Promise.all([
+                    setInventory(inventoryuid, inventoryData),
+                    setInventoryExportWeb(inventoryuid, this._exportWeb),
+                    watermarkPromise,
+                ]);
+
+                if (watermarkResponse?.status === Status.ERROR) {
+                    return watermarkResponse;
                 }
-                return Status.OK;
-            }
 
-            return Status.ERROR;
-        } catch (error) {
-            return Status.ERROR;
-        } finally {
-            this._isLoading = false;
+                if (inventoryResponse?.status === Status.OK && webResponse?.status === Status.OK) {
+                    if (inventoryuid !== "0") {
+                        await setInventoryWebCheck(inventoryuid, {
+                            enabled: !!this._exportWebActive ? 1 : 0,
+                        });
+                    }
+                    return Status.OK;
+                }
+
+                return {
+                    status: Status.ERROR,
+                    error: inventoryResponse?.error || webResponse?.error,
+                };
+            } catch (error) {
+                return {
+                    status: Status.ERROR,
+                    error: error as string,
+                };
+            } finally {
+                this._isLoading = false;
+            }
         }
-    });
+    );
 
     private saveInventoryMedia = action(
         async (mediaType: MediaType): Promise<{ status: Status; savedItems?: MediaItem[] }> => {

@@ -1,7 +1,8 @@
 import { CSSProperties, LegacyRef, ReactElement, useEffect, useId, useRef, useState } from "react";
+import { debounce } from "common/helpers";
 import { RadioButton, RadioButtonChangeEvent, RadioButtonProps } from "primereact/radiobutton";
 import "./index.css";
-import { InputNumber, InputNumberProps } from "primereact/inputnumber";
+import { InputNumber, InputNumberProps, InputNumberValueChangeEvent } from "primereact/inputnumber";
 import { Checkbox, CheckboxChangeEvent, CheckboxProps } from "primereact/checkbox";
 import { Calendar, CalendarProps } from "primereact/calendar";
 import { Dropdown, DropdownProps } from "primereact/dropdown";
@@ -9,11 +10,21 @@ import { InputText, InputTextProps } from "primereact/inputtext";
 import { STATES_LIST } from "common/constants/states";
 import { Button } from "primereact/button";
 import { InputMask, InputMaskChangeEvent, InputMaskProps } from "primereact/inputmask";
-import { useCursorToStart } from "common/hooks";
-import { ComboBox } from "../dropdown";
+import { ComboBox } from "dashboard/common/form/dropdown";
 import { DEFAULT_FILTER_THRESHOLD } from "common/settings";
+import { ERROR_MESSAGES } from "common/constants/error-messages";
 
 type LabelPosition = "left" | "right" | "top";
+
+export enum CURRENCY_OPTIONS {
+    DOLLAR = "$",
+    PERCENT = "%",
+}
+
+export const CURRENCY_SELECT_OPTIONS = [
+    { label: CURRENCY_OPTIONS.DOLLAR, value: 0, name: "dollar" },
+    { label: CURRENCY_OPTIONS.PERCENT, value: 1, name: "percent" },
+];
 
 interface DashboardRadioProps {
     radioArray: RadioButtonProps[];
@@ -21,12 +32,18 @@ interface DashboardRadioProps {
     disabled?: boolean;
     initialValue?: string | number | null;
     onChange?: (value: string | number) => void;
+    wrapperClassName?: string;
+    justifyContent?: "between" | "center" | "start" | "end";
+    rowGap?: number;
+    columnGap?: 2 | 3 | 4;
+    children?: React.ReactNode;
 }
 
 interface CurrencyInputProps extends InputNumberProps {
-    currencyIcon?: "dollar" | "percent";
+    currencyIcon?: CURRENCY_OPTIONS;
     labelPosition?: LabelPosition;
     coloredEmptyValue?: boolean;
+    wrapperClassName?: string;
 }
 
 interface PercentInputProps extends InputNumberProps {
@@ -67,12 +84,14 @@ interface TextInputProps extends InputTextProps {
     ref?: React.RefObject<HTMLInputElement>;
     wrapperClassName?: string;
     infoText?: string;
+    errorMessage?: string;
 }
 
 interface PhoneInputProps extends Omit<InputMaskProps, "onChange" | "onBlur"> {
     colWidth?: Range<1, 13>;
     onChange?: (e: any) => void;
     onBlur?: (e: any) => void;
+    withValidationMessage?: boolean;
 }
 
 interface StateDropdownProps extends DropdownProps {
@@ -89,7 +108,12 @@ export const DashboardRadio = ({
     initialValue,
     style,
     disabled,
+    wrapperClassName,
     onChange,
+    children,
+    rowGap = 3,
+    justifyContent = "between",
+    columnGap = 3,
 }: DashboardRadioProps): ReactElement => {
     const [radioValue, setRadioValue] = useState<string>("");
 
@@ -105,7 +129,9 @@ export const DashboardRadio = ({
     }, [initialValue]);
 
     return (
-        <div className='flex flex-wrap row-gap-3 justify-content-between radio'>
+        <section
+            className={`flex flex-wrap row-gap-${rowGap} justify-content-${justifyContent} ${columnGap ? `column-gap-${columnGap}` : ""} radio ${wrapperClassName || ""}`}
+        >
             {radioArray.map(({ name, title, value }) => {
                 return (
                     <div
@@ -129,7 +155,8 @@ export const DashboardRadio = ({
                     </div>
                 );
             })}
-        </div>
+            {children}
+        </section>
     );
 };
 
@@ -138,19 +165,62 @@ export const CurrencyInput = ({
     value,
     title,
     labelPosition = "left",
-    currencyIcon = "dollar",
+    currencyIcon = CURRENCY_OPTIONS.DOLLAR,
     coloredEmptyValue = false,
+    wrapperClassName,
     ...props
 }: CurrencyInputProps) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<InputNumber>(null);
     const uniqueId = useId();
+    const shouldClearOnInput = useRef(false);
 
-    useCursorToStart(containerRef);
+    const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+        const input = inputRef.current?.getInput() as HTMLInputElement | undefined;
+        if (input) {
+            requestAnimationFrame(() => {
+                input.setSelectionRange(0, 0);
+            });
+        }
+        if (!value || value === 0) {
+            shouldClearOnInput.current = true;
+        }
+        if (props.onFocus) {
+            props.onFocus(e);
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (shouldClearOnInput?.current && !!e?.key?.length) {
+            shouldClearOnInput.current = false;
+            const input = inputRef.current?.getInput() as HTMLInputElement | undefined;
+            if (input) {
+                input.select();
+            }
+        }
+        if (props.onKeyDown) {
+            props.onKeyDown(e);
+        }
+    };
+
+    const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+        shouldClearOnInput.current = false;
+        if (!value && value !== 0) {
+            if (props.onValueChange) {
+                props.onValueChange({
+                    value: 0,
+                } as InputNumberValueChangeEvent);
+            }
+        }
+        if (props.onBlur) {
+            props.onBlur(e);
+        }
+    };
 
     return (
         <div
             key={name}
-            className='flex align-items-center justify-content-between currency-item relative'
+            className={`flex align-items-center justify-content-between currency-item relative ${wrapperClassName || ""}`}
             ref={containerRef}
         >
             <label
@@ -160,24 +230,28 @@ export const CurrencyInput = ({
                 {title}
             </label>
             <div className='currency-item__input flex justify-content-center'>
-                {currencyIcon === "dollar" && (
+                {currencyIcon === CURRENCY_OPTIONS.DOLLAR && (
                     <div className='currency-item__icon input-icon input-icon-left'>
                         <i className='icon adms-dollar-sign' />
                     </div>
                 )}
-                {currencyIcon === "percent" && (
-                    <div className='currency-item__icon input-icon input-icon-left'>
+                {currencyIcon === CURRENCY_OPTIONS.PERCENT && (
+                    <div className='currency-item__icon input-icon input-icon-left currency-item__icon--percent'>
                         <i className='icon adms-percentage' />
                     </div>
                 )}
                 <InputNumber
+                    ref={inputRef}
                     inputId={uniqueId}
                     minFractionDigits={2}
                     maxFractionDigits={2}
                     min={0}
                     locale='en-US'
-                    value={value || 0}
+                    value={value === null ? null : value || 0}
                     inputClassName={`${coloredEmptyValue && !value ? "currency-item__input--empty" : ""}`}
+                    onFocus={handleFocus}
+                    onBlur={handleBlur}
+                    onKeyDown={handleKeyDown}
                     {...props}
                 />
             </div>
@@ -419,7 +493,13 @@ export const DateInput = ({
                         tooltipOptions={{ position: "top" }}
                     />
                 )}
-                <div className='date-item__icon input-icon input-icon-right' onClick={openCalendar}>
+                <div
+                    className='date-item__icon input-icon input-icon-right'
+                    style={{
+                        cursor: props.disabled ? "default" : "pointer",
+                    }}
+                    onClick={props.disabled ? undefined : openCalendar}
+                >
                     <i className='adms-calendar' />
                 </div>
             </div>
@@ -436,6 +516,7 @@ export const TextInput = ({
     ref,
     wrapperClassName,
     infoText,
+    errorMessage,
     ...props
 }: TextInputProps): ReactElement => {
     const [value, setValue] = useState<string>(props.value || "");
@@ -458,7 +539,9 @@ export const TextInput = ({
     };
 
     const content = (
-        <span className={`p-float-label relative ${wrapperClassName || ""}`}>
+        <span
+            className={`p-float-label text-input ${errorMessage ? "p-invalid" : ""} relative ${wrapperClassName || ""}`}
+        >
             <InputText
                 ref={ref}
                 id={uniqueId}
@@ -494,6 +577,7 @@ export const TextInput = ({
                     {infoText}
                 </small>
             )}
+            {errorMessage && <small className='p-error'>{errorMessage}</small>}
             <label htmlFor={uniqueId} className='float-label'>
                 {name}
             </label>
@@ -525,6 +609,7 @@ export const PhoneInput = ({
     colWidth,
     onChange,
     onBlur,
+    withValidationMessage = false,
     ...props
 }: PhoneInputProps): ReactElement => {
     const inputRef = useRef(null);
@@ -548,7 +633,7 @@ export const PhoneInput = ({
         const cleanValue = value?.replace(/[^0-9]/g, "");
 
         if (cleanValue && cleanValue.length < 10) {
-            setError("Phone number is not valid");
+            setError(ERROR_MESSAGES.PHONE);
         } else {
             setError("");
         }
@@ -577,9 +662,72 @@ export const PhoneInput = ({
             <label htmlFor={uniqueId} className='float-label'>
                 {name}
             </label>
-            {error && <div className='p-error pt-2'>{error}</div>}
+            {withValidationMessage && error && <div className='p-error pt-2'>{error}</div>}
         </span>
     );
 
     return colWidth ? <div className={`col-${colWidth}`}>{content}</div> : content;
+};
+
+interface GlobalSearchInputProps extends InputTextProps {
+    onInputChange?: (value: string) => void;
+    onIconClick?: () => void;
+    enableDebounce?: boolean;
+}
+
+export const GlobalSearchInput = ({
+    enableDebounce = false,
+    onChange,
+    onInputChange,
+    value,
+    ...props
+}: GlobalSearchInputProps): ReactElement => {
+    const uniqueId = useId();
+    const [internalValue, setInternalValue] = useState<string>(value || "");
+
+    const debouncedOnChange = debounce((value: string) => {
+        if (onInputChange) {
+            onInputChange(value);
+        }
+    });
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newValue = e.target.value;
+
+        if (enableDebounce) {
+            setInternalValue(newValue);
+            debouncedOnChange(newValue);
+        } else {
+            if (onChange) {
+                onChange(e);
+            }
+            if (onInputChange) {
+                onInputChange(newValue);
+            }
+        }
+    };
+
+    useEffect(() => {
+        if (!enableDebounce) {
+            setInternalValue(value || "");
+        } else {
+            setInternalValue(value || "");
+        }
+    }, [value, enableDebounce]);
+
+    return (
+        <span className='global-search p-input-icon-right p-float-label'>
+            <i className='icon adms-search global-search__icon' />
+            <InputText
+                id={uniqueId}
+                className='global-search__input'
+                value={enableDebounce ? internalValue : value || ""}
+                onChange={handleChange}
+                {...props}
+            />
+            <label htmlFor={uniqueId} className='global-search__label float-label'>
+                {props.placeholder || "Search"}
+            </label>
+        </span>
+    );
 };

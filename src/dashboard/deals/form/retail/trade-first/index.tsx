@@ -1,5 +1,5 @@
 import { observer } from "mobx-react-lite";
-import { ReactElement, useCallback, useEffect, useState } from "react";
+import { ReactElement, useCallback, useEffect, useId, useState } from "react";
 import "./index.css";
 import { InputText } from "primereact/inputtext";
 import {
@@ -24,6 +24,7 @@ import { ListData } from "common/models";
 import { ComboBox } from "dashboard/common/form/dropdown";
 import { AddToInventory, DealExtData } from "common/models/deals";
 import { useLocation } from "react-router-dom";
+import { Tooltip } from "primereact/tooltip";
 
 export const DealRetailTradeFirst = observer((): ReactElement => {
     const store = useStore().dealStore;
@@ -46,7 +47,7 @@ export const DealRetailTradeFirst = observer((): ReactElement => {
             Trade1_Lien_Phone,
         },
         deal: { addToInventory },
-
+        dealFirstTradeOverwrite,
         changeDealExtData,
         changeAddToInventory,
     } = store;
@@ -57,7 +58,7 @@ export const DealRetailTradeFirst = observer((): ReactElement => {
     const [automakesModelList, setAutomakesModelList] = useState<ListData[]>([]);
     const [colorList, setColorList] = useState<ListData[]>([]);
     const [bodyTypeList, setBodyTypeList] = useState<ListData[]>([]);
-    const [allowOverwrite, setAllowOverwrite] = useState<boolean>(false);
+    const uniqueId = useId();
 
     useEffect(() => {
         getInventoryAutomakesList().then((list) => {
@@ -137,7 +138,7 @@ export const DealRetailTradeFirst = observer((): ReactElement => {
 
     const handleVINchange = (vinInfo: VehicleDecodeInfo) => {
         if (vinInfo) {
-            if (allowOverwrite) {
+            if (dealFirstTradeOverwrite) {
                 handleChangeFormValue({
                     key: "Trade1_Make",
                     value: vinInfo.Make || values.Trade1_Make,
@@ -191,6 +192,37 @@ export const DealRetailTradeFirst = observer((): ReactElement => {
         }
     };
 
+    const tooltipTemplate = (
+        <div className='trade-overwrite pb-3'>
+            <Checkbox
+                checked={dealFirstTradeOverwrite}
+                id='trade-overwrite'
+                className='trade-overwrite__checkbox'
+                onChange={() => (store.dealFirstTradeOverwrite = !dealFirstTradeOverwrite)}
+            />
+
+            <label className='pl-3 trade-overwrite__label' htmlFor='trade-overwrite'>
+                Overwrite data
+            </label>
+            <i data-tooltip-id={uniqueId} className='icon adms-help trade-overwrite__icon' />
+            <Tooltip
+                target={`[data-tooltip-id="${uniqueId}"]`}
+                content={
+                    "Data received from the VIN decoder service will overwrite user-entered data."
+                }
+                position={"right"}
+                className='trade-overwrite__tooltip'
+                pt={{
+                    text: {
+                        style: {
+                            whiteSpace: "nowrap",
+                        },
+                    },
+                }}
+            />
+        </div>
+    );
+
     const handleMakeChange = useCallback(
         (value: string) => {
             setFieldValue("Trade1_Make", value);
@@ -216,18 +248,7 @@ export const DealRetailTradeFirst = observer((): ReactElement => {
 
     return (
         <div className='grid deal-retail-trade row-gap-2'>
-            <div className='col-12'>
-                <div className='trade-overwrite pb-3'>
-                    <Checkbox
-                        checked={allowOverwrite}
-                        id='trade-overwrite'
-                        className='trade-overwrite__checkbox'
-                        onChange={() => setAllowOverwrite(!allowOverwrite)}
-                    />
-                    <label className='pl-3 trade-overwrite__label'>Overwrite data</label>
-                    <i className='icon adms-help trade-overwrite__icon' />
-                </div>
-            </div>
+            {tooltipTemplate}
             <div className='col-6 relative'>
                 <VINDecoder
                     value={values.Trade1_VIN}

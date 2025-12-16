@@ -19,7 +19,8 @@ import { DatatableQueries, initialDataTableQueries } from "common/models/datatab
 import { getUserSettings, setUserSettings } from "http/services/auth-user.service";
 import { ExportWebUserSettings, ServerUserSettings, TableState } from "common/models/user";
 import { Status } from "common/models/base-response";
-import { InputText } from "primereact/inputtext";
+import { GlobalSearchInput } from "dashboard/common/form/inputs";
+import { TruncatedText } from "dashboard/common/display";
 
 interface HistoryColumnProps extends ColumnProps {
     field: keyof ExportWebHistoryList;
@@ -227,51 +228,47 @@ export const ExportHistory = (): ReactElement => {
 
     return (
         <div className='card-content history'>
-            <div className='grid datatable-controls'>
-                <div className='col-12 export-web-controls'>
-                    <div className='export-web-controls__input'>
-                        <MultiSelect
-                            showSelectAll={false}
-                            value={activeHistoryColumns}
-                            optionLabel='header'
-                            options={historyColumns}
-                            onChange={handleColumnToggle}
-                            className='w-full pb-0 h-full flex align-items-center column-picker'
-                            panelHeaderTemplate={dropdownHeaderPanel}
-                            display='chip'
-                            pt={{
-                                header: {
-                                    className: "column-picker__header",
+            <div className='datatable-controls'>
+                <GlobalSearchInput
+                    value={globalSearch}
+                    onChange={(e) => setGlobalSearch(e.target.value)}
+                />
+
+                <Button
+                    severity='success'
+                    type='button'
+                    icon='icon adms-print'
+                    tooltip='Print export to web form'
+                />
+                <Button
+                    severity='success'
+                    type='button'
+                    icon='icon adms-download'
+                    tooltip='Download export to web form'
+                />
+
+                <div className='export-web-controls__input ml-auto'>
+                    <MultiSelect
+                        showSelectAll={false}
+                        value={activeHistoryColumns}
+                        optionLabel='header'
+                        options={historyColumns}
+                        onChange={handleColumnToggle}
+                        className='w-full pb-0 flex align-items-center column-picker'
+                        panelHeaderTemplate={dropdownHeaderPanel}
+                        display='chip'
+                        pt={{
+                            header: {
+                                className: "column-picker__header",
+                            },
+                            wrapper: {
+                                className: "column-picker__wrapper",
+                                style: {
+                                    maxHeight: "500px",
                                 },
-                                wrapper: {
-                                    className: "column-picker__wrapper",
-                                    style: {
-                                        maxHeight: "500px",
-                                    },
-                                },
-                            }}
-                        />
-                    </div>
-                    <Button
-                        severity='success'
-                        type='button'
-                        icon='icon adms-print'
-                        tooltip='Print export to web form'
+                            },
+                        }}
                     />
-                    <Button
-                        severity='success'
-                        type='button'
-                        icon='icon adms-download'
-                        tooltip='Download export to web form'
-                    />
-                    <span className='p-input-icon-right export-web__search ml-auto'>
-                        <i className='icon adms-search' />
-                        <InputText
-                            value={globalSearch}
-                            placeholder='Search'
-                            onChange={(e) => setGlobalSearch(e.target.value)}
-                        />
-                    </span>
                 </div>
             </div>
             <div className='grid'>
@@ -286,6 +283,7 @@ export const ExportHistory = (): ReactElement => {
                         reorderableColumns
                         resizableColumns
                         className='export-web-table'
+                        rowClassName={() => "table-row"}
                         paginator
                         first={lazyState.first}
                         rows={lazyState.rows}
@@ -297,7 +295,9 @@ export const ExportHistory = (): ReactElement => {
                         onColReorder={handleColumnReorder}
                         onColumnResizeEnd={handleColumnResize}
                     >
-                        {activeHistoryColumns.map(({ field, header }) => {
+                        {activeHistoryColumns.map(({ field, header }, index) => {
+                            const savedWidth = serverSettings?.exportHistory?.columnWidth?.[field];
+
                             return (
                                 <Column
                                     field={field}
@@ -305,19 +305,23 @@ export const ExportHistory = (): ReactElement => {
                                     sortable
                                     header={header}
                                     reorderable={false}
+                                    body={(data) => {
+                                        const value = String(data[field] || "");
+                                        return <TruncatedText text={value} withTooltip />;
+                                    }}
                                     pt={{
                                         root: {
-                                            style: {
-                                                width: serverSettings?.exportHistory?.columnWidth?.[
-                                                    field
-                                                ],
-                                                maxWidth:
-                                                    serverSettings?.exportHistory?.columnWidth?.[
-                                                        field
-                                                    ],
-                                                overflow: "hidden",
-                                                textOverflow: "ellipsis",
-                                            },
+                                            style: savedWidth
+                                                ? {
+                                                      width: `${savedWidth}px`,
+                                                      maxWidth: `${savedWidth}px`,
+                                                      overflow: "hidden",
+                                                      textOverflow: "ellipsis",
+                                                  }
+                                                : {
+                                                      overflow: "hidden",
+                                                      textOverflow: "ellipsis",
+                                                  },
                                         },
                                     }}
                                 />

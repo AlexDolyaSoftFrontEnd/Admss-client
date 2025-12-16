@@ -31,6 +31,10 @@ import { createMediaItemRecord, uploadInventoryMedia } from "http/services/media
 import { action, makeAutoObservable } from "mobx";
 import { RootStore } from "store";
 import { filterPostPayload } from "common/utils";
+import {
+    CONTACT_FORM_FIELDS,
+    CONTACT_EXT_DATA_FORM_FIELDS,
+} from "common/constants/contact-form-fields";
 
 enum DLSides {
     FRONT = "front",
@@ -50,13 +54,10 @@ const initialMediaItem: UploadMediaItem = {
 export class ContactStore {
     public rootStore: RootStore;
     private _contact: Contact = { type: 0 } as Contact;
-    private _changedContactFields: (keyof Contact)[] = [];
     private _coBayerContact: Contact = { type: 0 } as Contact;
-    private _changedCoBayerContactFields: (keyof Contact)[] = [];
     private _contactTypeList: ContactType[] = [];
     private _contactType: number = 0;
     private _contactExtData: ContactExtData = {} as ContactExtData;
-    private _changedContactExtDataFields: (keyof ContactExtData)[] = [];
     private _contactProspect: Partial<ContactProspect>[] = [];
     private _contactID: string = "";
     private _contactOFAC: ContactOFAC = {} as ContactOFAC;
@@ -75,6 +76,15 @@ export class ContactStore {
     private _deleteReason: string = "";
     private _activeTab: number | null = null;
     private _tabLength: number = 0;
+    private _initialCoBuyerFields: {
+        firstName: string;
+        lastName: string;
+        middleName: string;
+    } = {
+        firstName: "",
+        lastName: "",
+        middleName: "",
+    };
 
     private _contactDocumentsID: Partial<InventoryMedia>[] = [];
     private _uploadFileDocuments: UploadMediaItem = initialMediaItem;
@@ -189,6 +199,58 @@ export class ContactStore {
         return this._formErrorMessage;
     }
 
+    public get isCoBuyerFieldsFilled() {
+        if (
+            this._contactExtData.CoBuyer_Emp_Company &&
+            typeof this._contactExtData.CoBuyer_Emp_Company === "string" &&
+            this._contactExtData.CoBuyer_Emp_Company.trim()
+        ) {
+            return false;
+        }
+
+        const nameFields = [
+            this._contactExtData.CoBuyer_First_Name,
+            this._contactExtData.CoBuyer_Middle_Name,
+            this._contactExtData.CoBuyer_Last_Name,
+        ];
+
+        if (nameFields.some((field) => field && typeof field === "string" && field.trim())) {
+            return true;
+        }
+
+        const otherTabFields = [
+            this._contactExtData.CoBuyer_Res_Address,
+            this._contactExtData.CoBuyer_State,
+            this._contactExtData.CoBuyer_City,
+            this._contactExtData.CoBuyer_Zip_Code,
+            this._contactExtData.CoBuyer_Mailing_Address,
+            this._contactExtData.CoBuyer_Mailing_State,
+            this._contactExtData.CoBuyer_Mailing_City,
+            this._contactExtData.CoBuyer_Mailing_Zip,
+            this._contactExtData.CoBuyer_DL_State,
+            this._contactExtData.CoBuyer_Driver_License_Num,
+            this._contactExtData.CoBuyer_DL_Exp_Date,
+            this._contactExtData.CoBuyer_SS_Number,
+            this._contactExtData.CoBuyer_Date_Of_Birth,
+            this._contactExtData.CoBuyer_Sex,
+        ];
+
+        return otherTabFields.some((field) => field && typeof field === "string" && field.trim());
+    }
+
+    public get coBuyerGeneralFieldsChanged() {
+        const currentFirstName = this._contactExtData.CoBuyer_First_Name || "";
+        const currentLastName = this._contactExtData.CoBuyer_Last_Name || "";
+        const currentMiddleName = this._contactExtData.CoBuyer_Middle_Name || "";
+
+        const hasChanged =
+            currentFirstName !== this._initialCoBuyerFields.firstName ||
+            currentLastName !== this._initialCoBuyerFields.lastName ||
+            currentMiddleName !== this._initialCoBuyerFields.middleName;
+
+        return hasChanged;
+    }
+
     public getContact = async (itemuid: string) => {
         this._isLoading = true;
         try {
@@ -204,6 +266,12 @@ export class ContactStore {
                 this._contact = contact || ({} as Contact);
                 this._contactExtData = extdata || ({} as ContactExtData);
                 this._contactProspect = this._contact?.prospect || [];
+
+                this._initialCoBuyerFields = {
+                    firstName: extdata?.CoBuyer_First_Name || "",
+                    lastName: extdata?.CoBuyer_Last_Name || "",
+                    middleName: extdata?.CoBuyer_Middle_Name || "",
+                };
             }
             if (this._contact.cobuyeruid) await this.getCoBuyerContact();
         } catch (error) {
@@ -271,21 +339,14 @@ export class ContactStore {
             isContactChanged: boolean = true
         ) => {
             if (value === undefined) value = "";
-            const pushToChangedFields = (key: keyof Omit<Contact, "extdata">) => {
-                if (!this._changedContactFields.includes(key)) {
-                    this._changedContactFields.push(key);
-                }
-            };
             if (isContactChanged) {
                 this._isContactChanged = true;
             }
             if (Array.isArray(keyOrEntries)) {
                 keyOrEntries.forEach(([key, val]) => {
-                    pushToChangedFields(key);
                     this._contact[key] = val as never;
                 });
             } else {
-                pushToChangedFields(keyOrEntries);
                 this._contact[keyOrEntries] = value as never;
             }
         }
@@ -293,13 +354,7 @@ export class ContactStore {
 
     public changeCobuyerContact = action(
         (key: keyof Omit<Contact, "extdata">, value: string | number | string[]) => {
-            const pushToChangedFields = (key: keyof Omit<Contact, "extdata">) => {
-                if (!this._changedCoBayerContactFields.includes(key)) {
-                    this._changedCoBayerContactFields.push(key);
-                }
-            };
             if (value === undefined) value = "";
-            pushToChangedFields(key);
             return (this._coBayerContact[key] = value as never);
         }
     );
@@ -309,21 +364,14 @@ export class ContactStore {
             keyOrEntries: keyof ContactExtData | [keyof ContactExtData, string | number][],
             value?: string | number
         ) => {
-            const pushToChangedFields = (key: keyof ContactExtData) => {
-                if (!this._changedContactExtDataFields.includes(key)) {
-                    this._changedContactExtDataFields.push(key);
-                }
-            };
             if (value === undefined) value = "";
             this._isContactChanged = true;
 
             if (Array.isArray(keyOrEntries)) {
                 keyOrEntries.forEach(([key, val]) => {
-                    pushToChangedFields(key);
                     this._contactExtData[key] = val as never;
                 });
             } else {
-                pushToChangedFields(keyOrEntries);
                 this._contactExtData[keyOrEntries] = value as never;
             }
         }
@@ -347,12 +395,13 @@ export class ContactStore {
             }
 
             const filteredContact = filterPostPayload(this.contact, {
-                includeKeys: this._changedContactFields,
+                includeOnlyKeys: CONTACT_FORM_FIELDS,
+                includeKeys: [...CONTACT_FORM_FIELDS],
             });
 
             const filteredExtData = filterPostPayload(this.contactExtData, {
-                excludeKeys: ["useruid"],
-                includeKeys: this._changedContactExtDataFields,
+                includeOnlyKeys: CONTACT_EXT_DATA_FORM_FIELDS,
+                includeKeys: [...CONTACT_EXT_DATA_FORM_FIELDS],
             });
 
             const contactData: Contact = {
@@ -369,18 +418,19 @@ export class ContactStore {
             ]);
 
             if (contactDataResponse?.status === Status.ERROR) {
-                await Promise.reject(contactDataResponse?.error);
+                await Promise.reject(contactDataResponse?.errors || contactDataResponse?.error);
                 return contactDataResponse;
             }
 
             if (this._contact.cobuyeruid) {
                 const filteredCoBuyerContact = filterPostPayload(this.coBuyerContact, {
-                    includeKeys: this._changedCoBayerContactFields,
+                    includeOnlyKeys: CONTACT_FORM_FIELDS,
+                    includeKeys: [...CONTACT_FORM_FIELDS],
                 });
 
                 const filteredCoBuyerExtData = filterPostPayload(this.contactExtData, {
-                    excludeKeys: ["useruid"],
-                    includeKeys: this._changedContactExtDataFields,
+                    includeOnlyKeys: CONTACT_EXT_DATA_FORM_FIELDS,
+                    includeKeys: [...CONTACT_EXT_DATA_FORM_FIELDS],
                 });
 
                 const coBuyerContactData: Contact = {
@@ -396,7 +446,9 @@ export class ContactStore {
                 ]);
 
                 if (coBuyerContactDataResponse?.status === Status.ERROR) {
-                    await Promise.reject(coBuyerContactDataResponse?.error);
+                    await Promise.reject(
+                        coBuyerContactDataResponse?.errors || coBuyerContactDataResponse?.error
+                    );
                     return coBuyerContactDataResponse;
                 }
             }

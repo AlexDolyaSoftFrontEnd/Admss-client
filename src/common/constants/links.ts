@@ -1,8 +1,9 @@
 export const HELP_PAGE: string = "https://www.admss.com/";
 export const CONTACT_SUPPORT: string = "contact-support";
+export const CREATE_ID: string = "create";
 
 export const DASHBOARD_PAGE: string = "/dashboard";
-export const CREATE_PATH: string = "/create";
+export const CREATE_PATH: string = `/${CREATE_ID}`;
 
 interface DealsPage {
     readonly MAIN: string;
@@ -98,6 +99,41 @@ interface TasksPage {
 }
 export const TASKS_PAGE: Readonly<TasksPage> = {
     MAIN: `${DASHBOARD_PAGE}/tasks`,
+};
+
+interface UsersPage {
+    readonly MAIN: string;
+    CREATE(): string;
+    EDIT(id: string): string;
+}
+
+export const USERS_PAGE: Readonly<UsersPage> = {
+    MAIN: `${DASHBOARD_PAGE}/users`,
+    CREATE() {
+        return `${this.MAIN}${CREATE_PATH}`;
+    },
+    EDIT(id: string) {
+        return `${this.MAIN}/${id}`;
+    },
+};
+
+interface SettingsPage {
+    readonly MAIN: string;
+    ROLES(): string;
+    ROLES_CREATE(): string;
+    ROLES_EDIT(id: string): string;
+}
+export const SETTINGS_PAGE: Readonly<SettingsPage> = {
+    MAIN: `${DASHBOARD_PAGE}/settings`,
+    ROLES() {
+        return `${this.MAIN}?section=roles`;
+    },
+    ROLES_CREATE() {
+        return `${this.MAIN}/roles${CREATE_PATH}`;
+    },
+    ROLES_EDIT(id: string) {
+        return `${this.MAIN}/roles/${id}`;
+    },
 };
 
 interface SidebarPage {

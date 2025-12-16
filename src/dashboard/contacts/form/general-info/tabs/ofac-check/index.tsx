@@ -1,14 +1,12 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { observer } from "mobx-react-lite";
 import { Button } from "primereact/button";
-import { ReactElement, useMemo, useState } from "react";
+import { ReactElement, useMemo, useState, useEffect } from "react";
 import "./index.css";
 import { useParams } from "react-router-dom";
 import { checkContactOFAC } from "http/services/contacts-service";
 import { Contact, ContactOFAC, OFAC_CHECK_STATUS } from "common/models/contact";
 import { Status } from "common/models/base-response";
-import { useToast } from "dashboard/common/toast";
-import { TOAST_LIFETIME } from "common/settings";
 import { BUYER_ID, GENERAL_CONTACT_TYPE } from "dashboard/contacts/form/general-info";
 import {
     OFACCheckFailedLayout,
@@ -16,6 +14,7 @@ import {
 } from "dashboard/contacts/form/general-info/tabs/ofac-check/ofac-layouts";
 import { useStore } from "store/hooks";
 import { ConfirmModal } from "dashboard/common/dialog/confirm";
+import { useToastMessage } from "common/hooks";
 
 interface ContactsOfacCheckProps {
     type?: GENERAL_CONTACT_TYPE.BUYER | GENERAL_CONTACT_TYPE.CO_BUYER;
@@ -23,7 +22,7 @@ interface ContactsOfacCheckProps {
 
 export const ContactsOfacCheck = observer(({ type }: ContactsOfacCheckProps): ReactElement => {
     const { id } = useParams();
-    const toast = useToast();
+    const { showError } = useToastMessage();
     const store = useStore().contactStore;
     const { contactOFAC, contact, contactFullInfo, contactExtData } = store;
     const [dialogShow, setDialogShow] = useState<boolean>(false);
@@ -35,6 +34,9 @@ export const ContactsOfacCheck = observer(({ type }: ContactsOfacCheckProps): Re
 
     const handleOfacCheck = async () => {
         let contactData: Partial<Contact> = {} as Contact;
+        if (!contact.firstName || !contact.lastName) {
+            return;
+        }
         if (type === GENERAL_CONTACT_TYPE.CO_BUYER) {
             contactData = {
                 firstName: contactExtData.CoBuyer_First_Name,
@@ -49,17 +51,15 @@ export const ContactsOfacCheck = observer(({ type }: ContactsOfacCheckProps): Re
                 dob: contactExtData.CoBuyer_Date_Of_Birth,
                 exp: contactExtData.CoBuyer_DL_Exp_Date,
             };
+            if (!contactData.firstName || !contactData.lastName) {
+                return;
+            }
         } else {
             contactData = contactFullInfo;
         }
         const response = await checkContactOFAC(id, contactData as Contact);
         if (response?.status === Status.ERROR) {
-            toast.current?.show({
-                severity: "error",
-                summary: Status.ERROR,
-                detail: response.error,
-                life: TOAST_LIFETIME,
-            });
+            showError(response.error);
         } else {
             const ofac = response as ContactOFAC;
             if (ofac?.check_status === OFAC_CHECK_STATUS.FAILED) {
@@ -68,6 +68,12 @@ export const ContactsOfacCheck = observer(({ type }: ContactsOfacCheckProps): Re
             store.contactOFAC = response as ContactOFAC;
         }
     };
+
+    useEffect(() => {
+        if (!isControlDisabled) {
+            handleOfacCheck();
+        }
+    }, []);
 
     return (
         <div className='grid ofac-check row-gap-2'>

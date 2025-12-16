@@ -1,12 +1,12 @@
 import { ReactElement, useEffect, useRef, useState } from "react";
 import {
     DataTable,
+    DataTableColReorderEvent,
+    DataTableColumnResizeEndEvent,
     DataTablePageEvent,
     DataTableRowClickEvent,
     DataTableSortEvent,
 } from "primereact/datatable";
-import { Button } from "primereact/button";
-import { InputText } from "primereact/inputtext";
 import { getInventoryList, getInventoryLocations } from "http/services/inventory-service";
 import { Inventory, InventoryLocations } from "common/models/inventory";
 import { QueryParams } from "common/models/query-params";
@@ -14,49 +14,25 @@ import { Column } from "primereact/column";
 import { DatatableQueries, initialDataTableQueries } from "common/models/datatable-queries";
 import { useNavigate } from "react-router-dom";
 import "./index.css";
-import {
-    MultiSelect,
-    MultiSelectChangeEvent,
-    MultiSelectPanelHeaderTemplateEvent,
-} from "primereact/multiselect";
-import { ROWS_PER_PAGE, TOAST_LIFETIME } from "common/settings";
-import {
-    AdvancedSearchDialog,
-    SEARCH_FIELD_TYPE,
-    SEARCH_FORM_TYPE,
-    SearchField,
-} from "dashboard/common/dialog/search";
-import {
-    getUserGroupList,
-    getUserSettings,
-    setUserSettings,
-} from "http/services/auth-user.service";
+import InventoryHeader from "dashboard/inventory/components/InventoryHeader";
+import { ROWS_PER_PAGE } from "common/settings";
+import { InventoryAdvancedSearch } from "dashboard/inventory/components/AdvancedSearch";
+import { getUserSettings, setUserSettings } from "http/services/auth-user.service";
 import {
     FilterOptions,
     TableColumnsList,
     columns,
     filterOptions,
 } from "dashboard/inventory/common/data-table";
-import {
-    InventoryUserSettings,
-    ServerUserSettings,
-    TableState,
-    UserGroup,
-} from "common/models/user";
-import { makeShortReports } from "http/services/reports.service";
-import { Checkbox } from "primereact/checkbox";
-import { ReportsColumn } from "common/models/reports";
-import {
-    createStringifyFilterQuery,
-    createStringifySearchQuery,
-    filterParams,
-    isObjectValuesEmpty,
-} from "common/helpers";
+import { InventoryUserSettings, ServerUserSettings, TableState } from "common/models/user";
+import { useCreateReport, useToastMessage } from "common/hooks";
+import { createStringifyFilterQuery } from "common/helpers";
 import { Loader } from "dashboard/common/loader";
 import { SplitButton } from "primereact/splitbutton";
 import { useStore } from "store/hooks";
-import { useToast } from "dashboard/common/toast";
 import { INVENTORY_PAGE } from "common/constants/links";
+import { Button } from "primereact/button";
+import { TruncatedText } from "dashboard/common/display";
 
 const DATA_FIELD = "data-field";
 
@@ -67,7 +43,7 @@ interface InventoriesProps {
     originalPath?: string;
 }
 
-interface AdvancedSearch extends Pick<Partial<Inventory>, "StockNo" | "Make" | "Model" | "VIN"> {}
+const UPPER_CASE_FIELDS = ["Make", "Model", "VIN"];
 
 export default function Inventories({
     onRowClick,
@@ -80,30 +56,44 @@ export default function Inventories({
     const [inventories, setInventories] = useState<Inventory[]>([]);
     const [totalRecords, setTotalRecords] = useState<number>(0);
     const [globalSearch, setGlobalSearch] = useState<string>("");
-    const [advancedSearch, setAdvancedSearch] = useState<AdvancedSearch>({});
-    const [lazyState, setLazyState] = useState<DatatableQueries>(initialDataTableQueries);
     const [dialogVisible, setDialogVisible] = useState<boolean>(false);
-    const [buttonDisabled, setButtonDisabled] = useState<boolean>(true);
+
+    const [lazyState, setLazyState] = useState<DatatableQueries>(initialDataTableQueries);
+
     const [selectedFilter, setSelectedFilter] = useState<Pick<FilterOptions, "value">[]>([]);
     const [selectedFilterOptions, setSelectedFilterOptions] = useState<FilterOptions[] | null>(
         null
     );
     const [serverSettings, setServerSettings] = useState<ServerUserSettings>();
+    const [settingsInitialized, setSettingsInitialized] = useState<boolean>(false);
     const [activeColumns, setActiveColumns] = useState<TableColumnsList[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [locations, setLocations] = useState<InventoryLocations[]>([]);
     const [currentLocation, setCurrentLocation] = useState<InventoryLocations>(
         {} as InventoryLocations
     );
-    const [inventoryType, setInventoryType] = useState<UserGroup[]>([]);
     const [selectedInventoryType, setSelectedInventoryType] = useState<string[]>([]);
     const dataTableRef = useRef<DataTable<Inventory[]>>(null);
     const [columnWidths, setColumnWidths] = useState<{ field: string; width: number }[]>([]);
     const store = useStore().inventoryStore;
-    const { clearInventory } = store;
-    const toast = useToast();
+    const { clearInventory, inventoryGroupClassList, getInventoryGroupClassList } = store;
+    const { showError } = useToastMessage();
+    const { createReport } = useCreateReport<Inventory>();
 
     const navigate = useNavigate();
+
+    const getInventoryInfo = async () => {
+        if (!authUser) return;
+
+        const locationsResponse = await getInventoryLocations(authUser.useruid);
+        if (locationsResponse && Array.isArray(locationsResponse)) {
+            setLocations(locationsResponse);
+        }
+        await getInventoryGroupClassList();
+        if (inventoryGroupClassList.length > 0) {
+            setSelectedInventoryType(inventoryGroupClassList.map((group) => group.description));
+        }
+    };
 
     useEffect(() => {
         if (dataTableRef.current) {
@@ -133,19 +123,7 @@ export default function Inventories({
     };
 
     useEffect(() => {
-        if (authUser) {
-            Promise.all([
-                getInventoryLocations(authUser.useruid),
-                getUserGroupList(authUser.useruid),
-            ]).then(([locationsResponse, userGroupsResponse]) => {
-                if (locationsResponse && Array.isArray(locationsResponse)) {
-                    setLocations(locationsResponse);
-                }
-                if (userGroupsResponse && Array.isArray(userGroupsResponse)) {
-                    setInventoryType(userGroupsResponse);
-                }
-            });
-        }
+        getInventoryInfo();
         return () => {
             store.isErasingNeeded = true;
             if (originalPath) {
@@ -156,10 +134,11 @@ export default function Inventories({
     }, []);
 
     useEffect(() => {
-        if (authUser && locations.length > 0) {
-            setIsLoading(true);
-            getUserSettings(authUser.useruid)
-                .then((response) => {
+        const loadSettings = async () => {
+            if (authUser && locations.length > 0) {
+                setIsLoading(true);
+                try {
+                    const response = await getUserSettings(authUser.useruid);
                     if (response?.profile.length) {
                         let allSettings: ServerUserSettings = {} as ServerUserSettings;
                         if (response.profile) {
@@ -172,10 +151,12 @@ export default function Inventories({
                         setServerSettings(allSettings);
                         const { inventory: settings } = allSettings;
                         if (settings?.activeColumns?.length) {
-                            const uniqueColumns = Array.from(new Set(settings?.activeColumns));
-                            const serverColumns = columns.filter((column) =>
-                                uniqueColumns.find((col) => col === column.field)
-                            );
+                            const uniqueColumns = Array.from(new Set(settings.activeColumns));
+                            const serverColumns = uniqueColumns
+                                .map((field) => columns.find((column) => column.field === field))
+                                .filter((foundColumn): foundColumn is TableColumnsList =>
+                                    Boolean(foundColumn)
+                                );
                             setActiveColumns(serverColumns);
                         } else {
                             setActiveColumns(columns.filter(({ checked }) => checked));
@@ -204,58 +185,30 @@ export default function Inventories({
                             setCurrentLocation(location || ({} as InventoryLocations));
                             store.currentLocation = location?.locationuid || "";
                         }
+                        setSettingsInitialized(true);
                     }
-                })
-                .finally(() => setIsLoading(false));
-        }
+                } finally {
+                    setIsLoading(false);
+                }
+            }
+        };
+
+        loadSettings();
     }, [authUser, locations, store, initialDataTableQueries]);
 
     const printTableData = async (print: boolean = false) => {
-        const columns: ReportsColumn[] = activeColumns.map((column) => ({
-            name: column.header as string,
-            data: column.field as string,
-            width: columnWidths?.find((item) => item.field === column.field)?.width || 0,
-        }));
-        const date = new Date();
-        const name = `inventory_${
-            date.getMonth() + 1
-        }-${date.getDate()}-${date.getFullYear()}_${date.getHours()}-${date.getMinutes()}`;
-
-        if (authUser) {
-            const data = inventories.map((item) => {
-                const filteredItem: Record<string, any> = {};
-                columns.forEach((column) => {
-                    if (item.hasOwnProperty(column.data)) {
-                        filteredItem[column.data] = item[column.data as keyof typeof item];
-                    }
-                });
-                return filteredItem;
-            });
-            const JSONreport = {
-                name,
-                itemUID: "0",
-                data,
-                columns,
-                format: "",
-            };
-            await makeShortReports(authUser.useruid, JSONreport).then((response) => {
-                const url = new Blob([response], { type: "application/pdf" });
-                let link = document.createElement("a");
-                link.href = window.URL.createObjectURL(url);
-                if (!print) {
-                    link.download = `Report-${name}.pdf`;
-                    link.click();
-                }
-
-                if (print) {
-                    window.open(
-                        link.href,
-                        "_blank",
-                        "toolbar=yes,scrollbars=yes,resizable=yes,top=100,left=100,width=1280,height=720"
-                    );
-                }
-            });
-        }
+        if (!authUser) return;
+        await createReport({
+            userId: authUser.useruid,
+            items: inventories,
+            columns: activeColumns.map((activeColumn) => ({
+                field: activeColumn.field as keyof Inventory,
+                header: String(activeColumn.header),
+            })),
+            widths: columnWidths,
+            print,
+            name: "inventory",
+        });
     };
 
     const changeSettings = (settings: Partial<InventoryUserSettings>) => {
@@ -321,216 +274,35 @@ export default function Inventories({
                 setInventories(response);
             }
         } catch (error) {
-            toast.current?.show({
-                severity: "error",
-                summary: "Error",
-                detail: String(error) || "Failed to load inventory data",
-                life: TOAST_LIFETIME,
-            });
+            showError(String(error) || "Failed to load inventory data");
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleSetAdvancedSearch = (key: keyof Inventory, value: string) => {
-        setIsLoading(true);
-        setAdvancedSearch((prevSearch) => {
-            const newSearch = { ...prevSearch, [key]: value };
-
-            const isAnyValueEmpty = isObjectValuesEmpty(newSearch);
-
-            setButtonDisabled(isAnyValueEmpty);
-
-            return newSearch;
-        });
-        setIsLoading(false);
-    };
-
-    const handleAdvancedSearch = () => {
-        setIsLoading(true);
-        const searchParams = createStringifySearchQuery(advancedSearch);
-        handleGetInventoryList(
-            { ...filterParams({ top: lazyState.first }), qry: searchParams },
-            true
-        );
-        setDialogVisible(false);
-        setIsLoading(false);
-    };
-
-    const handleClearAdvancedSearchField = async (key: keyof AdvancedSearch) => {
-        setIsLoading(true);
-        setButtonDisabled(true);
-        setAdvancedSearch((prev) => {
-            const updatedSearch = { ...prev };
-            delete updatedSearch[key];
-            return updatedSearch;
-        });
-
-        try {
-            setIsLoading(true);
-            const updatedSearch = { ...advancedSearch };
-            delete updatedSearch[key];
-
-            const isAdvancedSearchEmpty = isObjectValuesEmpty(advancedSearch);
-            const params: QueryParams = {
-                ...(lazyState.sortOrder === 1 && { type: "asc" }),
-                ...(lazyState.sortOrder === -1 && { type: "desc" }),
-                ...(!isAdvancedSearchEmpty && { qry: createStringifySearchQuery(updatedSearch) }),
-                skip: lazyState.first,
-                top: lazyState.rows,
-            };
-            await handleGetInventoryList(params);
-        } finally {
-            setButtonDisabled(false);
-        }
-    };
-
-    const dropdownHeaderPanel = ({ onCloseClick }: MultiSelectPanelHeaderTemplateEvent) => {
-        return (
-            <div className='dropdown-header flex pb-1'>
-                <label className='cursor-pointer dropdown-header__label'>
-                    <Checkbox
-                        onChange={() => {
-                            if (columns.length === activeColumns.length) {
-                                setActiveColumns(columns.filter(({ checked }) => checked));
-                                changeSettings({ activeColumns: [] });
-                            } else {
-                                setActiveColumns(columns);
-                                changeSettings({
-                                    activeColumns: columns.map(({ field }) => field),
-                                });
-                            }
-                        }}
-                        checked={columns.length === activeColumns.length}
-                        className='dropdown-header__checkbox mr-2'
-                    />
-                    Select All
-                </label>
-                <button
-                    className='p-multiselect-close p-link'
-                    onClick={(e) => {
-                        setActiveColumns(columns.filter(({ checked }) => checked));
-                        changeSettings({ activeColumns: [] });
-                        onCloseClick(e);
-                    }}
-                >
-                    <i className='pi pi-times' />
-                </button>
-            </div>
-        );
-    };
-
-    const dropdownFilterHeaderPanel = (evt: MultiSelectPanelHeaderTemplateEvent) => {
-        return (
-            <div className='dropdown-header flex pb-1'>
-                <label className='cursor-pointer dropdown-header__label'>
-                    <Checkbox
-                        checked={
-                            filterOptions.filter((option) => !option.disabled).length ===
-                            selectedFilter.length
-                        }
-                        onChange={(e) => {
-                            const isChecked = e.target.checked;
-                            setSelectedFilter(
-                                isChecked
-                                    ? filterOptions.map((option) => ({ value: option.value }))
-                                    : []
-                            );
-                            const selectedOptions = isChecked ? filterOptions : [];
-                            setSelectedFilterOptions(
-                                selectedOptions.filter((option) => !option.disabled)
-                            );
-                        }}
-                        className='dropdown-header__checkbox mr-2'
-                    />
-                    Select All
-                </label>
-                <button
-                    className='p-multiselect-close p-link'
-                    onClick={(e) => {
-                        setSelectedFilter([]);
-                        setSelectedFilterOptions([]);
-                        changeSettings({
-                            selectedFilterOptions: [],
-                        });
-                        evt.onCloseClick(e);
-                    }}
-                >
-                    <i className='pi pi-times' />
-                </button>
-            </div>
-        );
-    };
-
-    const dropdownTypeHeaderPanel = ({ onCloseClick }: MultiSelectPanelHeaderTemplateEvent) => {
-        return (
-            <div className='dropdown-header flex pb-1'>
-                <label className='cursor-pointer dropdown-header__label'>
-                    <Checkbox
-                        checked={selectedInventoryType.length === inventoryType.length}
-                        onChange={() => {
-                            if (inventoryType.length !== selectedInventoryType.length) {
-                                setSelectedInventoryType(
-                                    inventoryType.map(({ description }) => description)
-                                );
-                                changeSettings({
-                                    selectedInventoryType: inventoryType.map(
-                                        ({ description }) => description
-                                    ),
-                                });
-                            } else {
-                                setSelectedInventoryType([]);
-                                changeSettings({
-                                    selectedInventoryType: [],
-                                });
-                            }
-                        }}
-                        className='dropdown-header__checkbox mr-2'
-                    />
-                    Select All
-                </label>
-                <button
-                    className='p-multiselect-close p-link'
-                    onClick={(e) => {
-                        setSelectedInventoryType([]);
-                        changeSettings({
-                            selectedInventoryType: [],
-                        });
-                        onCloseClick(e);
-                    }}
-                >
-                    <i className='pi pi-times' />
-                </button>
-            </div>
-        );
-    };
-
     useEffect(() => {
-        if (!authUser || !serverSettings || !locations.length) return;
+        if (!authUser || !settingsInitialized || !locations.length) return;
 
         if (selectedFilterOptions) {
-            setSelectedFilter(selectedFilterOptions.map(({ value }) => value as any));
+            setSelectedFilter(
+                selectedFilterOptions.map(
+                    ({ value }) => value as unknown as Pick<FilterOptions, "value">
+                )
+            );
         }
         let qry: string = "";
 
         if (globalSearch) {
             qry += globalSearch;
-        } else {
-            qry += createStringifySearchQuery(advancedSearch);
         }
 
         if (selectedFilterOptions) {
-            if (globalSearch.length || Object.values(advancedSearch).length) qry += "+";
+            if (globalSearch.length) qry += "+";
             qry += createStringifyFilterQuery(selectedFilterOptions);
         }
 
         if (selectedInventoryType.length) {
-            if (
-                globalSearch.length ||
-                Object.values(advancedSearch).length ||
-                selectedFilterOptions
-            )
-                qry += "+";
+            if (globalSearch.length || selectedFilterOptions) qry += "+";
             selectedInventoryType.forEach(
                 (type, index) =>
                     (qry += `${type}.GroupClass${
@@ -558,7 +330,7 @@ export default function Inventories({
 
         handleGetInventoryList(params, true);
     }, [
-        serverSettings,
+        settingsInitialized,
         globalSearch,
         selectedFilterOptions,
         currentLocation,
@@ -567,194 +339,105 @@ export default function Inventories({
         locations.length,
     ]);
 
-    const searchFields: SearchField<AdvancedSearch>[] = [
-        {
-            key: "StockNo",
-            value: advancedSearch?.StockNo,
-            type: SEARCH_FIELD_TYPE.TEXT,
-        },
-        {
-            key: "Make",
-            value: advancedSearch?.Make,
-            type: SEARCH_FIELD_TYPE.DROPDOWN,
-        },
-        {
-            key: "Model",
-            value: advancedSearch?.Model,
-            type: SEARCH_FIELD_TYPE.DROPDOWN,
-        },
-        {
-            key: "VIN",
-            value: advancedSearch?.VIN,
-            type: SEARCH_FIELD_TYPE.TEXT,
-        },
-    ];
-
     const handleAddNewInventory = () => {
         navigate(INVENTORY_PAGE.CREATE());
     };
 
+    const handleFormatField = (field: string, value: string) => {
+        const currentCurrencySymbol = "$";
+        if (UPPER_CASE_FIELDS.includes(field)) {
+            return value.toUpperCase();
+        }
+        if (field === "Price" && !value.includes(currentCurrencySymbol)) {
+            return `${currentCurrencySymbol} ${value}`;
+        }
+        return value;
+    };
+
     const header = (
-        <div className='grid datatable-controls'>
-            <div className='flex justify-content-between align-items-center gap-3'>
-                <span className='p-input-icon-right inventory-top-controls__search'>
-                    <i
-                        className={`pi pi-${!globalSearch ? "search" : "times cursor-pointer"}`}
-                        onClick={() => setGlobalSearch("")}
-                    />
-                    <InputText
-                        value={globalSearch}
-                        onChange={(e) => setGlobalSearch(e.target.value)}
-                    />
-                </span>
-                <Button
-                    className='inventory-top-controls__search-button'
-                    label='Advanced search'
-                    severity='success'
-                    type='button'
-                    onClick={() => setDialogVisible(true)}
-                />
-            </div>
-            <div className='flex justify-content-between align-items-center gap-3 ml-3'>
-                <div className='inventory-top-controls'>
-                    <Button
-                        className='inventory-top-controls__button new-inventory-button'
-                        icon='icon adms-add-item'
-                        severity='success'
-                        type='button'
-                        tooltip='Add new inventory'
-                        onClick={handleAddNewInventory}
-                    >
-                        New
-                    </Button>
-                    <Button
-                        className='inventory-top-controls__button'
-                        severity='success'
-                        type='button'
-                        icon='icon adms-print'
-                        tooltip='Print inventory form'
-                        onClick={() => printTableData(true)}
-                    />
-                    <Button
-                        className='inventory-top-controls__button'
-                        severity='success'
-                        type='button'
-                        icon='icon adms-download'
-                        tooltip='Download inventory form'
-                        onClick={() => printTableData()}
-                    />
-                </div>
-            </div>
-            <div className='col-2 ml-auto'>
-                <MultiSelect
-                    optionValue='value'
-                    optionLabel='label'
-                    options={filterOptions}
-                    value={selectedFilter}
-                    onChange={({ value }: MultiSelectChangeEvent) => {
-                        const selectedOptions = filterOptions.filter((option) =>
-                            value.includes(option.value)
-                        );
-                        setSelectedFilterOptions(selectedOptions);
-
-                        changeSettings({
-                            selectedFilterOptions: selectedOptions,
-                        });
-                    }}
-                    placeholder='Filter'
-                    className='w-full pb-0 flex align-items-center inventory-filter'
-                    display='chip'
-                    selectedItemsLabel='Clear Filter'
-                    panelHeaderTemplate={dropdownFilterHeaderPanel}
-                    pt={{
-                        header: {
-                            className: "inventory-filter__header",
-                        },
-                        wrapper: {
-                            className: "inventory-filter__wrapper",
-                            style: {
-                                maxHeight: "500px",
-                            },
-                        },
-                    }}
-                />
-            </div>
-            <div className='col-2'>
-                <MultiSelect
-                    options={columns}
-                    value={activeColumns}
-                    optionLabel='header'
-                    onChange={({ value, stopPropagation }: MultiSelectChangeEvent) => {
-                        stopPropagation();
-                        const sortedValue = value.sort(
-                            (a: TableColumnsList, b: TableColumnsList) => {
-                                const firstIndex = columns.findIndex(
-                                    (col) => col.field === a.field
-                                );
-                                const secondIndex = columns.findIndex(
-                                    (col) => col.field === b.field
-                                );
-                                return firstIndex - secondIndex;
-                            }
-                        );
-
-                        setActiveColumns(sortedValue);
-
-                        changeSettings({
-                            activeColumns: value.map(({ field }: { field: string }) => field),
-                        });
-                    }}
-                    panelHeaderTemplate={dropdownHeaderPanel}
-                    className='w-full pb-0 h-full flex align-items-center column-picker'
-                    display='chip'
-                    pt={{
-                        header: {
-                            className: "column-picker__header",
-                        },
-                        wrapper: {
-                            className: "column-picker__wrapper",
-                            style: {
-                                maxHeight: "500px",
-                            },
-                        },
-                    }}
-                />
-            </div>
-            <div className='col-2'>
-                <MultiSelect
-                    optionValue='description'
-                    optionLabel='description'
-                    options={inventoryType}
-                    value={selectedInventoryType}
-                    onChange={({ value, stopPropagation }: MultiSelectChangeEvent) => {
-                        stopPropagation();
-                        setSelectedInventoryType(value);
-                        changeSettings({
-                            selectedInventoryType: value,
-                        });
-                    }}
-                    placeholder='Inventory Type'
-                    className='w-full pb-0 h-full flex align-items-center inventory-filter'
-                    display='chip'
-                    selectedItemsLabel='Clear Filter'
-                    panelHeaderTemplate={dropdownTypeHeaderPanel}
-                    pt={{
-                        header: {
-                            className: "inventory-filter__header",
-                        },
-                        wrapper: {
-                            className: "inventory-filter__wrapper",
-                            style: {
-                                maxHeight: "500px",
-                            },
-                        },
-                    }}
-                />
-            </div>
-        </div>
+        <InventoryHeader
+            searchValue={globalSearch}
+            onSearchChange={(nextValue: string) => setGlobalSearch(nextValue)}
+            onAdvancedSearch={() => setDialogVisible(true)}
+            onAddNew={handleAddNewInventory}
+            onPrint={() => printTableData(true)}
+            onDownload={() => printTableData(false)}
+            filterOptions={filterOptions}
+            selectedFilterValues={selectedFilter}
+            onFilterOptionsChange={(nextSelected: FilterOptions[]) => {
+                setSelectedFilterOptions(nextSelected);
+                changeSettings({ selectedFilterOptions: nextSelected });
+            }}
+            availableColumns={columns}
+            activeColumns={activeColumns}
+            onActiveColumnsChange={(nextColumns: TableColumnsList[]) => {
+                setActiveColumns(nextColumns);
+                changeSettings({ activeColumns: nextColumns.map(({ field }) => field) });
+            }}
+            inventoryTypes={inventoryGroupClassList}
+            selectedInventoryTypes={selectedInventoryType}
+            onInventoryTypesChange={(nextTypes: string[]) => {
+                setSelectedInventoryType(nextTypes);
+                changeSettings({ selectedInventoryType: nextTypes });
+            }}
+        />
     );
 
-    const handleOnRowClick = ({ data }: DataTableRowClickEvent) => {
+    const columnHeader = (title: string, field: string) => {
+        return <span data-field={field}>{title}</span>;
+    };
+
+    const columnEditButton = (itemuid: string) => {
+        return (
+            <Button
+                text
+                className='table-edit-button'
+                icon='adms-edit-item'
+                tooltip='Edit inventory'
+                tooltipOptions={{ position: "mouse" }}
+                onClick={() => navigate(INVENTORY_PAGE.EDIT(itemuid))}
+            />
+        );
+    };
+
+    const handleColumnReorder = (event: DataTableColReorderEvent) => {
+        if (Array.isArray(event.columns)) {
+            const orderArray = event.columns?.map((column: Column) => column.props.field);
+
+            const newActiveColumns = orderArray
+                .map((field: string | undefined) => {
+                    return activeColumns.find((column) => column.field === field) || null;
+                })
+                .filter(
+                    (column: TableColumnsList | null): column is TableColumnsList => column !== null
+                );
+
+            setActiveColumns(newActiveColumns);
+
+            changeSettings({
+                activeColumns: newActiveColumns.map(({ field }) => field),
+            });
+        }
+    };
+
+    const handleColumnResize = (event: DataTableColumnResizeEndEvent) => {
+        if (event.column.props.field) {
+            const newColumnWidth = {
+                [event.column.props.field as string]: event.element.offsetWidth,
+            };
+            changeSettings({
+                columnWidth: { ...serverSettings?.inventory?.columnWidth, ...newColumnWidth },
+            });
+        }
+    };
+
+    const handleOnRowClick = ({ data }: DataTableRowClickEvent): void => {
+        const selectedText = window.getSelection()?.toString();
+
+        if (!!selectedText?.length) {
+            return;
+        }
+
         if (getFullInfo) {
             getFullInfo(data as Inventory);
         }
@@ -764,10 +447,6 @@ export default function Inventories({
         } else {
             navigate(data.itemuid);
         }
-    };
-
-    const columnHeader = (title: string, field: string) => {
-        return <span data-field={field}>{title}</span>;
     };
 
     return (
@@ -841,50 +520,22 @@ export default function Inventories({
                                         reorderableColumns
                                         resizableColumns
                                         header={header}
-                                        rowClassName={() => "hover:text-primary cursor-pointer"}
+                                        rowClassName={() => "table-row"}
+                                        onColReorder={handleColumnReorder}
+                                        onColumnResizeEnd={handleColumnResize}
                                         onRowClick={handleOnRowClick}
-                                        onColReorder={(event: any) => {
-                                            if (authUser && Array.isArray(event.columns)) {
-                                                const orderArray = event.columns?.map(
-                                                    (column: any) => column.props.field
-                                                );
-
-                                                const newActiveColumns = orderArray
-                                                    .map((field: string) => {
-                                                        return (
-                                                            activeColumns.find(
-                                                                (column) => column.field === field
-                                                            ) || null
-                                                        );
-                                                    })
-                                                    .filter(
-                                                        (column: any): column is TableColumnsList =>
-                                                            column !== null
-                                                    );
-
-                                                setActiveColumns(newActiveColumns);
-
-                                                changeSettings({
-                                                    activeColumns: newActiveColumns,
-                                                });
-                                            }
-                                        }}
-                                        onColumnResizeEnd={(event) => {
-                                            if (authUser && event) {
-                                                const newColumnWidth = {
-                                                    [event.column?.props?.field as string]:
-                                                        event.element?.offsetWidth,
-                                                };
-                                                changeSettings({
-                                                    columnWidth: {
-                                                        ...serverSettings?.inventory?.columnWidth,
-                                                        ...newColumnWidth,
-                                                    },
-                                                });
-                                            }
-                                        }}
                                     >
-                                        {activeColumns.map(({ field, header }) => {
+                                        <Column
+                                            bodyStyle={{ textAlign: "center" }}
+                                            reorderable={false}
+                                            resizeable={false}
+                                            body={columnEditButton}
+                                            className='table-edit-button-column'
+                                        />
+                                        {activeColumns.map(({ field, header }, index) => {
+                                            const savedWidth =
+                                                serverSettings?.inventory?.columnWidth?.[field];
+
                                             return (
                                                 <Column
                                                     field={field}
@@ -896,25 +547,30 @@ export default function Inventories({
                                                     reorderable
                                                     headerClassName='cursor-move'
                                                     body={(data) => {
-                                                        if (field === "VIN") {
-                                                            return data[field].toUpperCase();
-                                                        }
-                                                        if (field === "Price") {
-                                                            return `$ ${data[field]}`;
-                                                        }
-                                                        return data[field];
+                                                        const value = handleFormatField(
+                                                            field,
+                                                            data[field]
+                                                        );
+                                                        return (
+                                                            <TruncatedText
+                                                                text={value}
+                                                                withTooltip
+                                                            />
+                                                        );
                                                     }}
                                                     pt={{
                                                         root: {
-                                                            style: {
-                                                                width: serverSettings?.inventory
-                                                                    ?.columnWidth?.[field],
-                                                                maxWidth:
-                                                                    serverSettings?.inventory
-                                                                        ?.columnWidth?.[field],
-                                                                overflow: "hidden",
-                                                                textOverflow: "ellipsis",
-                                                            },
+                                                            style: savedWidth
+                                                                ? {
+                                                                      width: `${savedWidth}px`,
+                                                                      maxWidth: `${savedWidth}px`,
+                                                                      overflow: "hidden",
+                                                                      textOverflow: "ellipsis",
+                                                                  }
+                                                                : {
+                                                                      overflow: "hidden",
+                                                                      textOverflow: "ellipsis",
+                                                                  },
                                                         },
                                                     }}
                                                 />
@@ -923,22 +579,16 @@ export default function Inventories({
                                     </DataTable>
                                 )}
                             </div>
+                            <InventoryAdvancedSearch
+                                visible={dialogVisible}
+                                onClose={() => setDialogVisible(false)}
+                                lazyState={lazyState}
+                                setIsLoading={setIsLoading}
+                                handleGetInventoryList={handleGetInventoryList}
+                            />
                         </div>
                     </div>
                 </div>
-                <AdvancedSearchDialog<AdvancedSearch>
-                    visible={dialogVisible}
-                    buttonDisabled={buttonDisabled}
-                    onHide={() => {
-                        setButtonDisabled(true);
-                        setDialogVisible(false);
-                    }}
-                    action={handleAdvancedSearch}
-                    onSearchClear={handleClearAdvancedSearchField}
-                    onInputChange={handleSetAdvancedSearch}
-                    fields={searchFields}
-                    searchForm={SEARCH_FORM_TYPE.INVENTORY}
-                />
             </div>
         </div>
     );

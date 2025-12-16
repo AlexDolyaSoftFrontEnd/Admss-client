@@ -8,22 +8,18 @@ import {
 } from "primereact/datatable";
 import { QueryParams } from "common/models/query-params";
 import { Button } from "primereact/button";
-import { InputText } from "primereact/inputtext";
 import { Column, ColumnProps } from "primereact/column";
-import { TotalDealsList, getDealsList } from "http/services/deals.service";
+import { getDealsList, TotalDealsList } from "http/services/deals.service";
 import { ROWS_PER_PAGE } from "common/settings";
-import { makeShortReports } from "http/services/reports.service";
 import { useNavigate } from "react-router-dom";
-import { ReportsColumn } from "common/models/reports";
 import { Deal } from "common/models/deals";
 import { Loader } from "dashboard/common/loader";
 import { MultiSelect, MultiSelectChangeEvent } from "primereact/multiselect";
-import { BaseResponseError } from "common/models/base-response";
-import { useToast } from "dashboard/common/toast";
 import {
     AdvancedSearchDialog,
     SEARCH_FORM_TYPE,
     SearchField,
+    SEARCH_FIELD_TYPE,
 } from "dashboard/common/dialog/search";
 import { useStore } from "store/hooks";
 import { createStringifySearchQuery, isObjectValuesEmpty } from "common/helpers";
@@ -32,6 +28,11 @@ import "./index.css";
 import { DropdownHeaderPanel } from "dashboard/deals/common";
 import { BUTTON_VARIANTS, ControlButton } from "dashboard/common/button";
 import { DEALS_PAGE } from "common/constants/links";
+import { GlobalSearchInput } from "dashboard/common/form/inputs";
+import { TruncatedText } from "dashboard/common/display";
+import { useCreateReport, useToastMessage } from "common/hooks";
+import { useUserProfileSettings } from "common/hooks/useUserProfileSettings";
+import { DealsUserSettings } from "common/models/user";
 
 interface TableColumnProps extends ColumnProps {
     field: keyof Deal | "";
@@ -63,6 +64,14 @@ enum FILTER_CATEGORIES {
     OTHER = "Other",
 }
 
+enum DEAL_STATUS_ID {
+    QUOTE_OR_PROSPECT = 0,
+    PENDING_OR_IN_TRANSIT = 1,
+    SOLD_NOT_FINALIZED = 2,
+    SOLD_FINALIZED = 3,
+    DEAD_OR_DELETED = 6,
+}
+
 const DEALS_TYPE_LIST: DealsFilterOptions[] = [
     { name: "All", value: "allTypes" },
     { name: "Buy Here Pay Here", value: "0.DealType" },
@@ -74,16 +83,16 @@ const DEALS_TYPE_LIST: DealsFilterOptions[] = [
 
 const DEALS_OTHER_LIST: DealsFilterOptions[] = [
     { name: "All incomplete", value: "0.DealComplete" },
-    { name: "Dead or Deleted", value: "6.DealStatus" },
+    { name: "Dead or Deleted", value: `${DEAL_STATUS_ID.DEAD_OR_DELETED}.DealStatus` },
     { name: "Deals not yet sent to RFC", value: "0.RFCSent" },
 ];
 
 const DEALS_STATUS_LIST: DealsFilterOptions[] = [
     { name: "All", value: "allStatuses" },
     { name: "Recent deals", value: "0.30.Age" },
-    { name: "Quotes", value: "0.DealStatus" },
-    { name: "Pending", value: "1.DealStatus" },
-    { name: "Sold, Not finalized", value: "2.DealStatus" },
+    { name: "Quotes", value: `${DEAL_STATUS_ID.QUOTE_OR_PROSPECT}.DealStatus` },
+    { name: "Pending", value: `${DEAL_STATUS_ID.PENDING_OR_IN_TRANSIT}.DealStatus` },
+    { name: "Sold, Not finalized", value: `${DEAL_STATUS_ID.SOLD_NOT_FINALIZED}.DealStatus` },
     { name: "Manager's review", value: "1.managerReview" },
 ];
 
@@ -92,6 +101,38 @@ const FILTER_GROUP_LIST: DealsFilterGroup[] = [
     { name: FILTER_CATEGORIES.STATUS, options: DEALS_STATUS_LIST },
     { name: FILTER_CATEGORIES.OTHER, options: DEALS_OTHER_LIST },
 ];
+
+const getDealStatusLabel = (dealStatusId: number): string => {
+    switch (dealStatusId) {
+        case DEAL_STATUS_ID.QUOTE_OR_PROSPECT:
+            return "Quote";
+        case DEAL_STATUS_ID.PENDING_OR_IN_TRANSIT:
+            return "Pending";
+        case DEAL_STATUS_ID.SOLD_NOT_FINALIZED:
+            return "Not finalized deals";
+        case DEAL_STATUS_ID.SOLD_FINALIZED:
+            return "Finalized deals";
+        default:
+            return "Unknown";
+    }
+};
+
+const getDealStatusIcon = (dealStatusId: number): string => {
+    const currentIcon = (color: string) => `pi pi-circle-fill pi-circle--${color}`;
+    const infoIcon = "adms-info";
+    switch (dealStatusId) {
+        case DEAL_STATUS_ID.QUOTE_OR_PROSPECT:
+            return infoIcon;
+        case DEAL_STATUS_ID.PENDING_OR_IN_TRANSIT:
+            return currentIcon("red");
+        case DEAL_STATUS_ID.SOLD_NOT_FINALIZED:
+            return currentIcon("orange");
+        case DEAL_STATUS_ID.SOLD_FINALIZED:
+            return currentIcon("green");
+        default:
+            return currentIcon("grey");
+    }
+};
 
 enum SEARCH_FORM_FIELDS {
     CUSTOMER = "accountInfo",
@@ -142,85 +183,80 @@ export const DealsDataTable = observer(
         const [advancedSearch, setAdvancedSearch] = useState<Record<string, string | number>>({});
         const [dialogVisible, setDialogVisible] = useState<boolean>(false);
         const [buttonDisabled, setButtonDisabled] = useState<boolean>(true);
-        const [activeColumns, setActiveColumns] = useState<TableColumnsList[]>(renderColumnsData);
+        const { activeColumns, setActiveColumnsAndSave, serverSettings, saveColumnWidth } =
+            useUserProfileSettings<DealsUserSettings, TableColumnsList>("deals", renderColumnsData);
+        const navigate = useNavigate();
+        const { showError } = useToastMessage();
+        const { createReport } = useCreateReport<Deal>();
 
         const searchFields = [
             {
                 key: SEARCH_FORM_FIELDS.CUSTOMER,
                 label: "Customer",
                 value: advancedSearch?.[SEARCH_FORM_FIELDS.CUSTOMER],
-                type: "text",
+                type: SEARCH_FIELD_TYPE.TEXT,
             },
             {
                 key: SEARCH_FORM_FIELDS.VIN,
                 label: "VIN",
                 value: advancedSearch?.[SEARCH_FORM_FIELDS.VIN],
-                type: "text",
+                type: SEARCH_FIELD_TYPE.TEXT,
             },
             {
                 key: SEARCH_FORM_FIELDS.STOCK_NO,
                 label: "Stock#",
                 value: advancedSearch?.[SEARCH_FORM_FIELDS.STOCK_NO],
-                type: "text",
+                type: SEARCH_FIELD_TYPE.TEXT,
             },
             {
                 key: SEARCH_FORM_FIELDS.DATE,
                 label: "Date",
                 value: advancedSearch?.[SEARCH_FORM_FIELDS.DATE],
-                type: "date",
+                type: SEARCH_FIELD_TYPE.DATE_RANGE,
             },
         ];
 
-        const navigate = useNavigate();
-        const toast = useToast();
+        const handleGetDeals = async (params: QueryParams, total?: boolean) => {
+            if (!authUser) return;
+
+            setIsLoading(true);
+            try {
+                if (total) {
+                    const totalResponse = await getDealsList(authUser.useruid, {
+                        ...params,
+                        total: 1,
+                    });
+                    if (totalResponse && !Array.isArray(totalResponse)) {
+                        const totalData = totalResponse as TotalDealsList;
+                        setTotalRecords(totalData.total ?? 0);
+                    }
+                }
+
+                const response = await getDealsList(authUser.useruid, params);
+                if (Array.isArray(response)) {
+                    setDeals(response);
+                } else {
+                    setDeals([]);
+                }
+            } catch (error) {
+                showError(String(error));
+            } finally {
+                setIsLoading(false);
+            }
+        };
 
         const printTableData = async (print: boolean = false) => {
-            setIsLoading(true);
-            const columns: ReportsColumn[] = renderColumnsData.map((column) => ({
-                name: column.header as string,
-                data: column.field as string,
-            }));
-            const date = new Date();
-            const name = `deals_${
-                date.getMonth() + 1
-            }-${date.getDate()}-${date.getFullYear()}_${date.getHours()}-${date.getMinutes()}`;
-
-            if (authUser) {
-                const data = deals.map((item) => {
-                    const filteredItem: Record<string, any> = {};
-                    columns.forEach((column) => {
-                        if (item.hasOwnProperty(column.data)) {
-                            filteredItem[column.data] = item[column.data as keyof typeof item];
-                        }
-                    });
-                    return filteredItem;
-                });
-                const JSONreport = {
-                    name,
-                    itemUID: "0",
-                    data,
-                    columns,
-                    format: "",
-                };
-                await makeShortReports(authUser?.useruid, JSONreport).then((response) => {
-                    const url = new Blob([response], { type: "application/pdf" });
-                    let link = document.createElement("a");
-                    link.href = window.URL.createObjectURL(url);
-                    if (!print) {
-                        link.download = `Report-${name}.pdf`;
-                        link.click();
-                    }
-
-                    if (print) {
-                        window.open(
-                            link.href,
-                            "_blank",
-                            "toolbar=yes,scrollbars=yes,resizable=yes,top=100,left=100,width=1280,height=720"
-                        );
-                    }
-                });
-            }
-            setIsLoading(false);
+            if (!authUser) return;
+            await createReport({
+                userId: authUser.useruid,
+                items: deals,
+                columns: activeColumns.map((activeColumn) => ({
+                    field: activeColumn.field as keyof Deal,
+                    header: String(activeColumn.header),
+                })),
+                print,
+                name: "deals",
+            });
         };
 
         const pageChanged = (event: DataTablePageEvent) => {
@@ -231,49 +267,33 @@ export const DealsDataTable = observer(
             setLazyState(event);
         };
 
-        const handleGetDealsList = async (params: QueryParams) => {
-            getDealsList(authUser!.useruid, params).then((response) => {
-                if (Array.isArray(response)) {
-                    setDeals(response);
-                    setIsLoading(false);
-                } else {
-                    setDeals([]);
-                }
-            });
-        };
-
         useEffect(() => {
-            getDealsList(authUser!.useruid, { total: 1 }).then((response) => {
-                const { error } = response as BaseResponseError;
-                if (response && !error) {
-                    const { total } = response as TotalDealsList;
-                    setTotalRecords(total ?? 0);
-                } else {
-                    toast.current?.show({
-                        severity: "error",
-                        summary: "Error",
-                        detail: error,
-                    });
-                }
-            });
-        }, [toast]);
+            if (!authUser) return;
 
-        useEffect(() => {
             const params: QueryParams = {
-                ...(globalSearch && { qry: globalSearch }),
+                ...(lazyState.sortOrder === 1 && { type: "asc" }),
+                ...(lazyState.sortOrder === -1 && { type: "desc" }),
                 ...(lazyState.sortField && { column: lazyState.sortField }),
                 skip: lazyState.first,
                 top: lazyState.rows,
             };
+
             let qry: string = "";
             const selectedFilters: string = [...dealSelectedGroup]
                 .filter((item) => item && item !== "allTypes" && item !== "allStatuses")
                 .join("+");
             if (selectedFilters.length) {
                 qry += selectedFilters;
+            }
+            if (globalSearch) {
+                if (qry.length) qry += "+";
+                qry += globalSearch;
+            }
+            if (qry.length) {
                 params.qry = qry;
             }
-            handleGetDealsList(params);
+
+            handleGetDeals(params, true);
         }, [lazyState, authUser, globalSearch, dealSelectedGroup]);
 
         const handleSetAdvancedSearch = (key: keyof AdvancedSearch, value: string | number) => {
@@ -302,6 +322,10 @@ export const DealsDataTable = observer(
                             break;
                         case SEARCH_FORM_FIELDS.DATE:
                             keyName = SEARCH_FORM_QUERY.DATE;
+                            if (typeof value === "string" && value.includes("-")) {
+                                const [startDate, endDate] = value.split("-");
+                                return `${startDate}.${endDate}.${keyName}`;
+                            }
                             value = new Date(value).getTime();
                             break;
                     }
@@ -314,19 +338,17 @@ export const DealsDataTable = observer(
                 top: lazyState.rows,
                 qry: searchQuery,
             };
-            authUser &&
-                getDealsList(authUser?.useruid, params).then((response) => {
-                    if (Array.isArray(response)) {
-                        setDeals(response);
-                    } else {
-                        setDeals([]);
-                    }
-                });
+            handleGetDeals(params);
 
             setDialogVisible(false);
         };
 
-        const handleOnRowClick = ({ data }: DataTableRowClickEvent) => {
+        const handleOnRowClick = ({ data }: DataTableRowClickEvent): void => {
+            const selectedText = window.getSelection()?.toString();
+
+            if (!!selectedText?.length) {
+                return;
+            }
             if (getFullInfo) {
                 getFullInfo(data as Deal);
             }
@@ -360,7 +382,7 @@ export const DealsDataTable = observer(
                     skip: lazyState.first,
                     top: lazyState.rows,
                 };
-                await handleGetDealsList(params);
+                await handleGetDeals(params);
             } finally {
                 setButtonDisabled(false);
             }
@@ -374,17 +396,112 @@ export const DealsDataTable = observer(
             navigate(DEALS_PAGE.CREATE());
         };
 
+        const filterTemplate = (
+            <span className='p-float-label'>
+                <MultiSelect
+                    optionValue='value'
+                    optionLabel='name'
+                    value={dealSelectedGroup}
+                    options={FILTER_GROUP_LIST}
+                    optionGroupLabel='name'
+                    optionGroupChildren='options'
+                    panelHeaderTemplate={<></>}
+                    display='chip'
+                    className='deals__filter'
+                    onChange={(e) => {
+                        e.stopPropagation();
+                        const newValue = [...e.value];
+                        const lastSelected = newValue[newValue.length - 1];
+
+                        const lastSelectedCategory = FILTER_GROUP_LIST.find((group) =>
+                            group.options.some((option) => option.value === lastSelected)
+                        )?.name;
+
+                        if (
+                            lastSelectedCategory === FILTER_CATEGORIES.TYPE ||
+                            lastSelectedCategory === FILTER_CATEGORIES.STATUS
+                        ) {
+                            const filteredValue = newValue.filter((item) => {
+                                const itemCategory = FILTER_GROUP_LIST.find((group) =>
+                                    group.options.some((option) => option.value === item)
+                                )?.name;
+                                return (
+                                    itemCategory !== lastSelectedCategory || item === lastSelected
+                                );
+                            });
+                            setDealSelectedGroup(filteredValue);
+                        } else {
+                            setDealSelectedGroup(newValue);
+                        }
+                    }}
+                    pt={{
+                        wrapper: {
+                            style: {
+                                width: "230px",
+                                maxHeight: "625px",
+                            },
+                        },
+                    }}
+                />
+                <label className='float-label'>Filter</label>
+            </span>
+        );
+
+        const columnsTemplate = (
+            <span className='p-float-label'>
+                <MultiSelect
+                    value={activeColumns}
+                    options={renderColumnsData}
+                    optionLabel='header'
+                    className='deals__columns'
+                    display='chip'
+                    panelHeaderTemplate={() => (
+                        <DropdownHeaderPanel
+                            columns={renderColumnsData}
+                            activeColumns={activeColumns}
+                            setActiveColumns={setActiveColumnsAndSave}
+                        />
+                    )}
+                    onChange={({ value, stopPropagation }: MultiSelectChangeEvent) => {
+                        stopPropagation();
+                        const sortedValue = value.sort(
+                            (a: TableColumnsList, b: TableColumnsList) => {
+                                const firstIndex = renderColumnsData.findIndex(
+                                    (col) => col.field === a.field
+                                );
+                                const secondIndex = renderColumnsData.findIndex(
+                                    (col) => col.field === b.field
+                                );
+                                return firstIndex - secondIndex;
+                            }
+                        );
+
+                        setActiveColumnsAndSave(sortedValue);
+                    }}
+                    pt={{
+                        header: {
+                            className: "deals__columns-header",
+                        },
+                        wrapper: {
+                            className: "deals__columns-wrapper",
+                            style: {
+                                width: "230px",
+                                maxHeight: "500px",
+                            },
+                        },
+                    }}
+                />
+                <label className='float-label'>Columns</label>
+            </span>
+        );
+
         return (
             <div className='card-content'>
                 <div className='datatable-controls'>
-                    <span className='p-input-icon-right p-float-label datatable-controls__search'>
-                        <i className='icon adms-search' />
-                        <InputText
-                            value={globalSearch}
-                            onChange={(e) => setGlobalSearch(e.target.value)}
-                        />
-                        <label className='float-label'>Search</label>
-                    </span>
+                    <GlobalSearchInput
+                        value={globalSearch}
+                        onChange={(e) => setGlobalSearch(e.target.value)}
+                    />
 
                     <Button
                         className='datatable-controls__search-button'
@@ -394,118 +511,23 @@ export const DealsDataTable = observer(
                         onClick={() => setDialogVisible(true)}
                     />
 
-                    <div className='contact-top-controls'>
-                        <ControlButton
-                            variant={BUTTON_VARIANTS.NEW}
-                            tooltip='Add new deal'
-                            onClick={handleCreateDeal}
-                        />
-                        <ControlButton
-                            variant={BUTTON_VARIANTS.PRINT}
-                            tooltip='Print deals form'
-                            onClick={() => printTableData(true)}
-                        />
-                        <ControlButton
-                            variant={BUTTON_VARIANTS.DOWNLOAD}
-                            tooltip='Download deals form'
-                            onClick={() => printTableData()}
-                        />
-                    </div>
-
-                    <span className='p-float-label'>
-                        <MultiSelect
-                            optionValue='value'
-                            optionLabel='name'
-                            value={dealSelectedGroup}
-                            options={FILTER_GROUP_LIST}
-                            optionGroupLabel='name'
-                            optionGroupChildren='options'
-                            panelHeaderTemplate={<></>}
-                            display='chip'
-                            className='deals__filter'
-                            onChange={(e) => {
-                                e.stopPropagation();
-                                const newValue = [...e.value];
-                                const lastSelected = newValue[newValue.length - 1];
-
-                                const lastSelectedCategory = FILTER_GROUP_LIST.find((group) =>
-                                    group.options.some((option) => option.value === lastSelected)
-                                )?.name;
-
-                                if (
-                                    lastSelectedCategory === FILTER_CATEGORIES.TYPE ||
-                                    lastSelectedCategory === FILTER_CATEGORIES.STATUS
-                                ) {
-                                    const filteredValue = newValue.filter((item) => {
-                                        const itemCategory = FILTER_GROUP_LIST.find((group) =>
-                                            group.options.some((option) => option.value === item)
-                                        )?.name;
-                                        return (
-                                            itemCategory !== lastSelectedCategory ||
-                                            item === lastSelected
-                                        );
-                                    });
-                                    setDealSelectedGroup(filteredValue);
-                                } else {
-                                    setDealSelectedGroup(newValue);
-                                }
-                            }}
-                            pt={{
-                                wrapper: {
-                                    style: {
-                                        width: "230px",
-                                        maxHeight: "625px",
-                                    },
-                                },
-                            }}
-                        />
-                        <label className='float-label'>Filter</label>
-                    </span>
-                    <span className='p-float-label'>
-                        <MultiSelect
-                            value={activeColumns}
-                            options={renderColumnsData}
-                            optionLabel='header'
-                            className='deals__columns'
-                            display='chip'
-                            panelHeaderTemplate={() => (
-                                <DropdownHeaderPanel
-                                    columns={renderColumnsData}
-                                    activeColumns={activeColumns}
-                                    setActiveColumns={setActiveColumns}
-                                />
-                            )}
-                            onChange={({ value, stopPropagation }: MultiSelectChangeEvent) => {
-                                stopPropagation();
-                                const sortedValue = value.sort(
-                                    (a: TableColumnsList, b: TableColumnsList) => {
-                                        const firstIndex = renderColumnsData.findIndex(
-                                            (col) => col.field === a.field
-                                        );
-                                        const secondIndex = renderColumnsData.findIndex(
-                                            (col) => col.field === b.field
-                                        );
-                                        return firstIndex - secondIndex;
-                                    }
-                                );
-
-                                setActiveColumns(sortedValue);
-                            }}
-                            pt={{
-                                header: {
-                                    className: "deals__columns-header",
-                                },
-                                wrapper: {
-                                    className: "deals__columns-wrapper",
-                                    style: {
-                                        width: "230px",
-                                        maxHeight: "500px",
-                                    },
-                                },
-                            }}
-                        />
-                        <label className='float-label'>Columns</label>
-                    </span>
+                    <ControlButton
+                        variant={BUTTON_VARIANTS.NEW}
+                        tooltip='Add new deal'
+                        onClick={handleCreateDeal}
+                    />
+                    <ControlButton
+                        variant={BUTTON_VARIANTS.PRINT}
+                        tooltip='Print deals form'
+                        onClick={() => printTableData(true)}
+                    />
+                    <ControlButton
+                        variant={BUTTON_VARIANTS.DOWNLOAD}
+                        tooltip='Download deals form'
+                        onClick={() => printTableData()}
+                    />
+                    {filterTemplate}
+                    {columnsTemplate}
                 </div>
                 <div className='grid'>
                     <div className='col-12'>
@@ -527,18 +549,89 @@ export const DealsDataTable = observer(
                                 onSort={sortData}
                                 reorderableColumns
                                 resizableColumns
-                                rowClassName={() => "hover:text-primary cursor-pointer"}
+                                rowClassName={() => "table-row"}
                                 onRowClick={handleOnRowClick}
+                                onColumnResizeEnd={(event) => {
+                                    if (
+                                        event?.column?.props?.field &&
+                                        event?.element?.offsetWidth
+                                    ) {
+                                        saveColumnWidth(
+                                            event.column.props.field as string,
+                                            event.element.offsetWidth
+                                        );
+                                    }
+                                }}
                             >
-                                {activeColumns.map(({ field, header }) => (
-                                    <Column
-                                        field={field}
-                                        header={header}
-                                        key={field}
-                                        sortable
-                                        headerClassName='cursor-move'
-                                    />
-                                ))}
+                                <Column
+                                    bodyStyle={{ textAlign: "center" }}
+                                    reorderable={false}
+                                    resizeable={false}
+                                    body={(rowDeal: Deal) => {
+                                        const statusIcon = getDealStatusIcon(rowDeal.dealstatus);
+                                        const statusLabel = getDealStatusLabel(rowDeal.dealstatus);
+                                        return (
+                                            <div className={`flex gap-3 align-items-center`}>
+                                                <Button
+                                                    text
+                                                    className='table-edit-button'
+                                                    icon='adms-edit-item'
+                                                    tooltip='Edit deal'
+                                                    tooltipOptions={{ position: "mouse" }}
+                                                    onClick={() =>
+                                                        navigate(DEALS_PAGE.EDIT(rowDeal.dealuid))
+                                                    }
+                                                />
+                                                <Button
+                                                    icon={statusIcon}
+                                                    className='deals__status-icon'
+                                                    text
+                                                    tooltip={statusLabel}
+                                                    tooltipOptions={{ position: "mouse" }}
+                                                />
+                                            </div>
+                                        );
+                                    }}
+                                    pt={{
+                                        root: {
+                                            style: {
+                                                width: "100px",
+                                            },
+                                        },
+                                    }}
+                                />
+                                {activeColumns.map(({ field, header }: TableColumnsList) => {
+                                    const savedWidth = serverSettings?.deals?.columnWidth?.[field];
+
+                                    return (
+                                        <Column
+                                            field={field}
+                                            header={header}
+                                            key={field}
+                                            sortable
+                                            headerClassName='cursor-move'
+                                            body={(data) => {
+                                                const value = String(data[field] || "");
+                                                return <TruncatedText text={value} withTooltip />;
+                                            }}
+                                            pt={{
+                                                root: {
+                                                    style: savedWidth
+                                                        ? {
+                                                              width: `${savedWidth}px`,
+                                                              maxWidth: `${savedWidth}px`,
+                                                              overflow: "hidden",
+                                                              textOverflow: "ellipsis",
+                                                          }
+                                                        : {
+                                                              overflow: "hidden",
+                                                              textOverflow: "ellipsis",
+                                                          },
+                                                },
+                                            }}
+                                        />
+                                    );
+                                })}
                             </DataTable>
                         )}
                     </div>

@@ -7,7 +7,7 @@ import App from "App";
 import { Dashboard } from "dashboard";
 import { Accounts } from "dashboard/accounts";
 import { AccountsForm } from "dashboard/accounts/form";
-import Contacts from "dashboard/contacts";
+import { Contacts } from "dashboard/contacts";
 import { ContactForm } from "dashboard/contacts/form";
 import { Deals } from "dashboard/deals";
 import { DealsForm } from "dashboard/deals/form";
@@ -15,6 +15,7 @@ import { Home } from "dashboard/home";
 import Inventory from "dashboard/inventory";
 import { InventoryForm } from "dashboard/inventory/form";
 import { SignIn } from "sign/sign-in";
+import { TwoFactorAuth } from "sign/two-factor-auth";
 import ProtectedRoute from "http/routes/ProtectedRoute";
 import { GeneralSettings } from "dashboard/profile/generalSettings";
 import { Reports } from "dashboard/reports";
@@ -24,9 +25,12 @@ import { PrintForTestDrive } from "dashboard/test-drive";
 import { AccountTakePayment } from "dashboard/accounts/take-payment-form";
 import { Tasks } from "dashboard/tasks";
 import { ErrorBoundary } from "http/routes/ErrorBoundary";
-import { ToastProvider } from "dashboard/common/toast";
+import { AppProvider } from "common/providers/AppProvider";
 import { ServiceUpdate } from "services/service-update";
 import { DealWashout } from "dashboard/deals/form/washout";
+import { Users } from "dashboard/profile/users";
+import { UsersForm } from "dashboard/profile/users/form";
+import { UsersRolesForm } from "dashboard/profile/generalSettings/roles/form";
 
 const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
 
@@ -38,6 +42,10 @@ const AppRouter = (): ReactElement => {
             errorElement: <ErrorBoundary />,
             children: [
                 { path: "", element: <SignIn /> },
+                {
+                    path: "2fa",
+                    element: <TwoFactorAuth />,
+                },
                 {
                     path: "service-update",
                     element: <ServiceUpdate />,
@@ -120,9 +128,26 @@ const AppRouter = (): ReactElement => {
                             path: "settings",
                             element: (
                                 <ProtectedRoute notAllowed={["salesPerson"]}>
-                                    <GeneralSettings />
+                                    <Outlet />
                                 </ProtectedRoute>
                             ),
+                            children: [
+                                { path: "", element: <GeneralSettings /> },
+                                { path: "roles", element: <UsersRolesForm /> },
+                                { path: "roles/:id", element: <UsersRolesForm /> },
+                            ],
+                        },
+                        {
+                            path: "users",
+                            element: (
+                                <ProtectedRoute notAllowed={["salesPerson"]}>
+                                    <Outlet />
+                                </ProtectedRoute>
+                            ),
+                            children: [
+                                { path: "", element: <Users /> },
+                                { path: ":id", element: <UsersForm /> },
+                            ],
                         },
                         {
                             path: "reports",
@@ -163,9 +188,9 @@ const AppRouter = (): ReactElement => {
     const router: RemixRouter = createBrowserRouter(routes);
 
     return (
-        <ToastProvider>
+        <AppProvider>
             <RouterProvider router={router} />
-        </ToastProvider>
+        </AppProvider>
     );
 };
 

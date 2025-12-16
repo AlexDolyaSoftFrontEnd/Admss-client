@@ -48,6 +48,18 @@
             flex-shrink: 0;
         }
     }
+
+    .deals__status-icon.p-button {
+        height: 20px;
+        width: 20px;
+        padding: 0;
+        .p-button-icon {
+            font-size: 13px;
+        }
+        .adms-info {
+            color: var(--admss-app-main-blue);
+        }
+    }
 }
 
 .deal__card {
@@ -64,7 +76,7 @@
 
 .deal__accordion {
     border: none;
-    width: 343px;
+    width: var(--admss-app-card-sidebar-width);
 }
 
 .deal__accordion .p-accordion-header .p-accordion-header-link,
@@ -159,7 +171,7 @@
 }
 
 .card-content__wrapper:has(.deal__accordion) {
-    flex: 0 0 343px;
+    flex: 0 0 var(--admss-app-card-sidebar-width);
 }
 
 .deal__delete-nav {

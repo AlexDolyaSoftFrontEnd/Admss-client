@@ -50,16 +50,25 @@ export const ContactsGeneralInfo = observer((): ReactElement => {
     const { errors, values, validateField, setFieldValue, setFieldTouched } =
         useFormikContext<Contact>();
 
-    const [savedFirstName, setSavedFirstName] = useState<string>(contact.firstName || "");
-    const [savedLastName, setSavedLastName] = useState<string>(contact.lastName || "");
-    const [savedMiddleName, setSavedMiddleName] = useState<string>(contact.middleName || "");
-    const [savedBusinessName, setSavedBusinessName] = useState<string>(contact.businessName || "");
-    const prevTypeRef = useRef<number | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState<boolean>(false);
+    const [isScanning, setIsScanning] = useState<boolean>(false);
+
+    const handleFieldChange = async (
+        field: keyof Omit<Contact, "extdata">,
+        value: string,
+        shouldTouch?: boolean
+    ) => {
+        changeContact(field, value);
+        await setFieldValue(field, value, true);
+        await validateField(field);
+        if (shouldTouch) {
+            setFieldTouched(field, true, true);
+        }
+    };
 
     const handleGetTypeList = async () => {
         setIsLoading(true);
-        const response = await getContactsTypeList(id || "0");
+        const response = await getContactsTypeList(id);
         if (response && Array.isArray(response)) {
             setTypeList(response);
         } else {
@@ -82,7 +91,7 @@ export const ContactsGeneralInfo = observer((): ReactElement => {
         const file = event.target.files?.[0];
         if (!file) return;
 
-        store.isLoading = true;
+        setIsScanning(true);
 
         try {
             const response = await scanContactDL(file);
@@ -190,7 +199,7 @@ export const ContactsGeneralInfo = observer((): ReactElement => {
                 life: TOAST_LIFETIME,
             });
         } finally {
-            store.isLoading = false;
+            setIsScanning(false);
             event.target.value = "";
         }
     };
@@ -207,65 +216,12 @@ export const ContactsGeneralInfo = observer((): ReactElement => {
 
     const shouldDisableBusinessName = useMemo(() => {
         return (
-            !isBusinessNameRequired && (!!contact.firstName?.trim() || !!contact.lastName?.trim())
+            !isBusinessNameRequired &&
+            (!!contact.firstName?.trim() ||
+                !!contact.middleName?.trim() ||
+                !!contact.lastName?.trim())
         );
     }, [isBusinessNameRequired, contact.firstName, contact.lastName]);
-
-    useEffect(() => {
-        if (prevTypeRef.current === contact.type) return;
-
-        if (shouldDisableNameFields) {
-            if (contact.firstName) {
-                setSavedFirstName(contact.firstName);
-                setFieldValue("firstName", "");
-                changeContact("firstName", "", false);
-            }
-            if (contact.lastName) {
-                setSavedLastName(contact.lastName);
-                setFieldValue("lastName", "");
-                changeContact("lastName", "", false);
-            }
-            if (contact.middleName) {
-                setSavedMiddleName(contact.middleName);
-                setFieldValue("middleName", "");
-                changeContact("middleName", "", false);
-            }
-        } else {
-            if (!contact.firstName && savedFirstName) {
-                setFieldValue("firstName", savedFirstName);
-                changeContact("firstName", savedFirstName, false);
-            }
-            if (!contact.lastName && savedLastName) {
-                setFieldValue("lastName", savedLastName);
-                changeContact("lastName", savedLastName, false);
-            }
-            if (!contact.middleName && savedMiddleName) {
-                setFieldValue("middleName", savedMiddleName);
-                changeContact("middleName", savedMiddleName, false);
-            }
-        }
-
-        prevTypeRef.current = contact.type;
-    }, [shouldDisableNameFields, contact.type]);
-
-    useEffect(() => {
-        if (prevTypeRef.current === contact.type) return;
-
-        if (shouldDisableBusinessName) {
-            if (contact.businessName) {
-                setSavedBusinessName(contact.businessName);
-                setFieldValue("businessName", "");
-                changeContact("businessName", "", false);
-            }
-        } else {
-            if (!contact.businessName && savedBusinessName) {
-                setFieldValue("businessName", savedBusinessName);
-                changeContact("businessName", savedBusinessName, false);
-            }
-        }
-
-        prevTypeRef.current = contact.type;
-    }, [shouldDisableBusinessName, contact.type]);
 
     const handleOfacCheck = () => {
         if (!contact?.firstName || !contact.lastName) {
@@ -323,11 +279,15 @@ export const ContactsGeneralInfo = observer((): ReactElement => {
                         <div className='col-12 flex gap-4'>
                             <Button
                                 type='button'
-                                label='Scan driver license'
-                                className='general-info__button'
+                                label={isScanning ? "Scanning" : "Scan driver license"}
+                                className={`general-info__button ${isScanning ? "general-info__button--loading" : ""}`}
                                 tooltip='Data received from the DL’s backside will fill in related fields'
-                                outlined
+                                outlined={!isScanning}
                                 onClick={handleScanDL}
+                                loading={isScanning}
+                                loadingIcon={
+                                    <Loader size='small' includeText={false} color='white' />
+                                }
                             />
                             <input
                                 type='file'
@@ -369,12 +329,9 @@ export const ContactsGeneralInfo = observer((): ReactElement => {
                                 <TextInput
                                     className={`general-info__text-input ${errors.firstName ? "p-invalid" : ""}`}
                                     value={contact.firstName || ""}
-                                    onChange={({ target: { value } }) => {
-                                        setFieldValue("firstName", value, true).then(() => {
-                                            changeContact("firstName", value);
-                                            validateField("firstName");
-                                        });
-                                    }}
+                                    onChange={({ target: { value } }) =>
+                                        handleFieldChange("firstName", value)
+                                    }
                                     onBlur={handleOfacCheck}
                                     name={`First Name${!shouldDisableNameFields ? " (required)" : ""}`}
                                     tooltip={
@@ -395,13 +352,9 @@ export const ContactsGeneralInfo = observer((): ReactElement => {
                                     name='Middle Name'
                                     className={`general-info__text-input ${errors.middleName ? "p-invalid" : ""}`}
                                     value={contact.middleName || ""}
-                                    onChange={({ target: { value } }) => {
-                                        setFieldValue("middleName", value, true).then(() => {
-                                            changeContact("middleName", value);
-                                            validateField("middleName");
-                                            setFieldTouched("middleName", true, true);
-                                        });
-                                    }}
+                                    onChange={({ target: { value } }) =>
+                                        handleFieldChange("middleName", value, true)
+                                    }
                                     tooltip={
                                         isBusinessNameRequired
                                             ? TOOLTIP_MESSAGE.ONLY_BUSINESS
@@ -420,12 +373,9 @@ export const ContactsGeneralInfo = observer((): ReactElement => {
                                     name={`Last Name${!shouldDisableNameFields ? " (required)" : ""}`}
                                     className={`general-info__text-input ${errors.lastName ? "p-invalid" : ""}`}
                                     value={contact.lastName || ""}
-                                    onChange={({ target: { value } }) => {
-                                        setFieldValue("lastName", value, true).then(() => {
-                                            changeContact("lastName", value);
-                                            validateField("lastName");
-                                        });
-                                    }}
+                                    onChange={({ target: { value } }) =>
+                                        handleFieldChange("lastName", value)
+                                    }
                                     onBlur={handleOfacCheck}
                                     disabled={shouldDisableNameFields}
                                     tooltip={

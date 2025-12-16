@@ -1,10 +1,12 @@
 import { AxiosError } from "axios";
-import { convertToStandardTimestamp } from "common/helpers";
+import { convertToStandardTimestamp, debounce } from "common/helpers";
+import { DEBOUNCE_TIME } from "common/settings";
 import { BaseResponseError, Status } from "common/models/base-response";
 import {
     Deal,
     DealExtData,
     DealFinance,
+    DealFinanceRecalculatePayload,
     DealPickupPayment,
     DealPrintForm,
     DealWashout,
@@ -12,6 +14,7 @@ import {
 } from "common/models/deals";
 import { Inventory } from "common/models/inventory";
 import {
+    dealFinancesRecalculate,
     getDealFinance,
     getDealInfo,
     getDealPayments,
@@ -40,6 +43,11 @@ export enum DEAL_DELETE_MESSAGES {
     DELETE_DEAL_AVAILABLE_FOR_SALE = 'Do you really want to delete the deal with all related options you\'ve selected and set the inventory to "Available for sale"? This action cannot be undone.',
 }
 
+export enum INCLUDE_OPTIONS {
+    COMMISSION1 = "COMMISSION1",
+    COMMISSION = "COMMISSION",
+}
+
 export const NEW_PAYMENT_LABEL = "new_";
 export const EMPTY_PAYMENT_LENGTH = 7;
 
@@ -51,6 +59,9 @@ export class DealStore {
     private _dealFinance = {} as DealFinance;
     private _dealFinances: DealFinance = {} as DealFinance;
     private _dealWashout: DealWashout = {} as DealWashout;
+    private _originalDealWashout: DealWashout = {} as DealWashout;
+    private _temporaryWashoutState: DealWashout | null = null;
+    private _isWashoutStatePreserved: boolean = false;
     private _dealPickupPayments: (DealPickupPayment & { changed?: boolean })[] = [];
     private _dealID: string = "";
     private _dealType: number = 0;
@@ -69,9 +80,35 @@ export class DealStore {
     private _deleteInventoryOption: boolean = false;
     private _setInventoryAvailableOption: boolean = false;
 
+    private _dealFirstTradeOverwrite: boolean = false;
+    private _dealSecondTradeOverwrite: boolean = false;
+
+    private _debouncedRecalculate: (dealuid: string) => void;
+
+    private readonly _recalculateKeys: (keyof DealFinance)[] = [
+        "CashPrice",
+        "TradeAllowance",
+        "TaxRate",
+        "Taxes",
+        "Accessory",
+        "Tags",
+        "Title",
+        "LicenseAndReg",
+        "Warranty",
+        "Gap",
+        "DocFee",
+        "TradeInPayoff",
+        "NetTradeAllowance",
+        "CashDown",
+    ];
+
     public constructor(rootStore: RootStore) {
         makeAutoObservable(this, { rootStore: false });
         this.rootStore = rootStore;
+        this._debouncedRecalculate = debounce(
+            (dealuid: string) => this.recalculateAndUpdateWashout(dealuid),
+            DEBOUNCE_TIME
+        );
     }
 
     public get deal() {
@@ -96,6 +133,16 @@ export class DealStore {
 
     public get dealWashout() {
         return this._dealWashout;
+    }
+
+    public get isWashoutChanged() {
+        const current = JSON.stringify(this._dealWashout);
+        const original = JSON.stringify(this._originalDealWashout);
+        return current !== original;
+    }
+
+    public get isWashoutStatePreserved() {
+        return this._isWashoutStatePreserved;
     }
 
     public get dealType() {
@@ -160,6 +207,14 @@ export class DealStore {
 
     public get setInventoryAvailableOption() {
         return this._setInventoryAvailableOption;
+    }
+
+    public get dealFirstTradeOverwrite() {
+        return this._dealFirstTradeOverwrite;
+    }
+
+    public get dealSecondTradeOverwrite() {
+        return this._dealSecondTradeOverwrite;
     }
 
     public get hasDeleteOptionsSelected() {
@@ -227,7 +282,13 @@ export class DealStore {
             this._dealErrorMessage = "";
             const response = await getDealWashout(dealuid);
             if (response && response.status === Status.OK) {
-                this._dealWashout = response as DealWashout;
+                if (!this._isWashoutStatePreserved) {
+                    this._dealWashout = response as DealWashout;
+                    this._originalDealWashout = JSON.parse(JSON.stringify(response as DealWashout));
+                } else {
+                    this._originalDealWashout = JSON.parse(JSON.stringify(response as DealWashout));
+                    this._isWashoutStatePreserved = false;
+                }
             } else {
                 const { error } = response as BaseResponseError;
                 this._dealErrorMessage = error!;
@@ -273,7 +334,8 @@ export class DealStore {
     public changeDealFinances = action(
         ({ key, value }: { key: keyof DealFinance; value: string | number }) => {
             const dealStore = this.rootStore.dealStore;
-            if (dealStore) {
+            if (dealStore && dealStore._dealID) {
+                this._isFormChanged = true;
                 const { dealFinances } = dealStore;
                 (dealFinances as Record<typeof key, string | number>)[key] = value;
             }
@@ -285,7 +347,132 @@ export class DealStore {
         if (dealStore) {
             const { dealWashout } = dealStore;
             (dealWashout as Record<typeof key, string | number>)[key] = value;
+
+            if (dealStore._dealID) {
+                dealStore._debouncedRecalculate(dealStore._dealID);
+            }
         }
+    });
+
+    public toggleIncludeCheckbox = action(
+        async (fieldName: string, option: INCLUDE_OPTIONS | null) => {
+            const dealStore = this.rootStore.dealStore;
+            if (dealStore && dealStore._dealID) {
+                const { dealWashout } = dealStore;
+                const check1Field = `${fieldName}Check1` as keyof DealWashout;
+                const check2Field = `${fieldName}Check2` as keyof DealWashout;
+                const dealWashoutRecord = dealWashout as unknown as Record<
+                    typeof check1Field | typeof check2Field,
+                    number
+                >;
+
+                if (option === INCLUDE_OPTIONS.COMMISSION1) {
+                    dealWashoutRecord[check1Field] = 1;
+                    dealWashoutRecord[check2Field] = 0;
+                } else if (option === INCLUDE_OPTIONS.COMMISSION) {
+                    dealWashoutRecord[check1Field] = 0;
+                    dealWashoutRecord[check2Field] = 1;
+                } else {
+                    dealWashoutRecord[check1Field] = 0;
+                    dealWashoutRecord[check2Field] = 0;
+                }
+
+                await dealStore.recalculateAndUpdateWashout(dealStore._dealID);
+            }
+        }
+    );
+
+    public getIncludeCheckboxValue = (fieldName: string): INCLUDE_OPTIONS | null => {
+        const dealStore = this.rootStore.dealStore;
+        if (dealStore) {
+            const { dealWashout } = dealStore;
+            const check1Field = `${fieldName}Check1` as keyof DealWashout;
+            const check2Field = `${fieldName}Check2` as keyof DealWashout;
+            const dealWashoutRecord = dealWashout as unknown as Record<
+                typeof check1Field | typeof check2Field,
+                number
+            >;
+            if (dealWashoutRecord[check1Field] === 1) {
+                return INCLUDE_OPTIONS.COMMISSION1;
+            }
+            if (dealWashoutRecord[check2Field] === 1) {
+                return INCLUDE_OPTIONS.COMMISSION;
+            }
+            return null;
+        }
+        return null;
+    };
+
+    public resetWashoutChanges = action(() => {
+        this._originalDealWashout = JSON.parse(JSON.stringify(this._dealWashout));
+    });
+
+    public preserveWashoutState = action(() => {
+        this._temporaryWashoutState = JSON.parse(JSON.stringify(this._dealWashout));
+        this._isWashoutStatePreserved = true;
+    });
+
+    public restoreWashoutState = action(() => {
+        if (this._temporaryWashoutState && this._isWashoutStatePreserved) {
+            this._dealWashout = JSON.parse(JSON.stringify(this._temporaryWashoutState));
+            this._temporaryWashoutState = null;
+        }
+    });
+
+    public recalculateFinances = action(async (dealuid: string) => {
+        try {
+            this._isLoading = true;
+            this._dealErrorMessage = "";
+            const financePayload: Partial<DealFinance> = this._recalculateKeys.reduce(
+                (accumulator, key) => {
+                    accumulator[key] = this._dealFinances[key];
+                    return accumulator;
+                },
+                {} as Record<string, string | number>
+            );
+
+            const payload: DealFinanceRecalculatePayload = {
+                ...financePayload,
+                washout: this._dealWashout,
+            };
+
+            const response = await dealFinancesRecalculate(dealuid, payload);
+            if (response && response.status === Status.OK) {
+                this._dealFinances = response as DealFinance;
+                return true;
+            } else {
+                const { error } = response as BaseResponseError;
+                this._dealErrorMessage = error!;
+                return false;
+            }
+        } catch (error) {
+            return false;
+        } finally {
+            this._isLoading = false;
+        }
+    });
+
+    public recalculateAndUpdateWashout = action(async (dealuid: string) => {
+        const currentWashoutState = JSON.parse(JSON.stringify(this._dealWashout));
+        const recalculateSuccess = await this.recalculateFinances(dealuid);
+        if (recalculateSuccess) {
+            const washoutResponse = await getDealWashout(dealuid);
+            if (washoutResponse && washoutResponse.status === Status.OK) {
+                const updatedWashout = washoutResponse as DealWashout;
+                Object.keys(currentWashoutState).forEach((key) => {
+                    (updatedWashout as unknown as Record<string, string | number>)[key] = (
+                        currentWashoutState as unknown as Record<string, string | number>
+                    )[key];
+                });
+                this._dealWashout = updatedWashout;
+            }
+        }
+        return recalculateSuccess;
+    });
+
+    public clearWashoutState = action(() => {
+        this._temporaryWashoutState = null;
+        this._isWashoutStatePreserved = false;
     });
 
     public changeDealPickupPayments = action(
@@ -492,6 +679,14 @@ export class DealStore {
 
     public set isFormChanged(value: boolean) {
         this._isFormChanged = value;
+    }
+
+    public set dealFirstTradeOverwrite(value: boolean) {
+        this._dealFirstTradeOverwrite = value;
+    }
+
+    public set dealSecondTradeOverwrite(value: boolean) {
+        this._dealSecondTradeOverwrite = value;
     }
 
     public clearDeal = () => {

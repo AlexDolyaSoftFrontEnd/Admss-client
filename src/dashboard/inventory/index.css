@@ -1,10 +1,39 @@
 .inventory {
-    --inventory-navigate-width: 343px;
+    --inventory-navigate-width: var(--admss-app-card-sidebar-width);
     --inventory-content-max-height: 705px;
     --inventory-content-height: 54vh;
 
     .form-line {
         margin: 15px 0;
+    }
+
+    .datatable-controls {
+        display: flex;
+        flex-wrap: wrap;
+        width: 100%;
+        align-items: center;
+        padding: 0;
+        margin-bottom: 20px;
+        gap: 20px;
+    }
+
+    .inventory-dropdown {
+        height: 50px;
+        width: 230px;
+    }
+
+    .p-multiselect-label {
+        margin-top: 0.2rem;
+    }
+    .inventory-top-controls__search-button {
+        height: 50px;
+        width: 200px;
+        font-weight: 600;
+    }
+
+    .p-datatable-tbody > tr > td.table-edit-button-column {
+        padding: 0;
+        width: 50px;
     }
 }
 .inventory__title {
@@ -43,11 +72,6 @@
 .inventory__accordion {
     border: none;
     width: var(--inventory-navigate-width);
-}
-
-.inventory-top-controls {
-    display: flex;
-    gap: 20px;
 }
 
 .inventory__accordion .p-accordion-header .p-accordion-header-link,
@@ -336,15 +360,6 @@
 
 .inventory-form .p-datatable .p-datatable-thead {
     height: 44px;
-}
-
-.inventory-top-controls__search-button {
-    width: 200px;
-}
-
-.inventory-top-controls__search.p-input-icon-right > .p-inputtext {
-    width: 200px;
-    padding-right: 0;
 }
 
 .inventory-filter.p-multiselect {

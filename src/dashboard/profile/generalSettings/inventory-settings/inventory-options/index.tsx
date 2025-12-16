@@ -25,13 +25,13 @@ export const SettingsInventoryOptions = observer((): ReactElement => {
     const toast = useToast();
     const store = useStore().generalSettingsStore;
     const { inventoryGroupID, inventoryGroups } = store;
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState<boolean>(false);
 
     const [inventoryOptions, setInventoryOptions] = useState<Partial<GeneralInventoryOptions>[]>(
         []
     );
-    const [editedItem, setEditedItem] = useState<Partial<GeneralInventoryOptions>>({});
-    const [layoutKey, setLayoutKey] = useState(false);
+    const [editedItem, setEditedItem] = useState<Partial<GeneralInventoryOptions> | null>(null);
+    const [layoutKey, setLayoutKey] = useState<boolean>(false);
 
     const handleGetInventoryOptionsGroupList = async () => {
         const response = await getInventoryGroupOptions(inventoryGroupID);
@@ -118,6 +118,10 @@ export const SettingsInventoryOptions = observer((): ReactElement => {
         option: Partial<GeneralInventoryOptions>,
         newOrder?: number
     ) => {
+        if (option.itemuid === editedItem?.itemuid) {
+            return;
+        }
+
         const currentIndex = inventoryOptions.findIndex((item) => item.itemuid === option.itemuid);
         const updatedOptions = inventoryOptions.map((item, index) => {
             if (item.itemuid === option.itemuid) {
@@ -164,6 +168,8 @@ export const SettingsInventoryOptions = observer((): ReactElement => {
             });
             return handleGetInventoryOptionsGroupList();
         }
+
+        await handleGetInventoryOptionsGroupList();
     };
 
     const handleRestoreDefaults = async () => {
@@ -189,7 +195,10 @@ export const SettingsInventoryOptions = observer((): ReactElement => {
     };
 
     const handleDragItem = async (layout: Layout[], oldItem: Layout, newItem: Layout) => {
-        if (oldItem.x === newItem.x && oldItem.y === newItem.y) {
+        if (
+            (oldItem.x === newItem.x && oldItem.y === newItem.y) ||
+            oldItem.i === editedItem?.itemuid
+        ) {
             return;
         }
 
@@ -274,11 +283,16 @@ export const SettingsInventoryOptions = observer((): ReactElement => {
     }, [inventoryOptions]);
 
     const handleNewOption = () => {
+        if (inventoryOptions.find((item) => item.itemuid === NEW_ITEM)) {
+            setEditedItem({});
+            setInventoryOptions(inventoryOptions.filter((item) => item.itemuid !== NEW_ITEM));
+            return;
+        }
         setEditedItem({ name: "", itemuid: NEW_ITEM });
         setInventoryOptions([...inventoryOptions, { name: "", itemuid: NEW_ITEM }]);
         setTimeout(() => {
             const contentRef = document.querySelector(
-                ".settings-inventory__tabs .p-tabview-panels"
+                ".settings-inventory__tabs .general-inventory-option"
             ) as HTMLDivElement;
             if (contentRef) {
                 contentRef.scrollTo({ top: contentRef.scrollHeight, behavior: "smooth" });
@@ -302,6 +316,7 @@ export const SettingsInventoryOptions = observer((): ReactElement => {
                             options={inventoryGroups}
                             value={inventoryGroupID}
                             onChange={(e) => {
+                                setEditedItem({});
                                 store.inventoryGroupID = e.value;
                             }}
                             placeholder='Group class'
@@ -350,15 +365,15 @@ export const SettingsInventoryOptions = observer((): ReactElement => {
                                 rowHeight={45}
                                 width={600}
                                 margin={[10, 1]}
-                                isDraggable={true}
-                                isDroppable={true}
+                                isDraggable={!editedItem || !Object.keys(editedItem).length}
+                                isDroppable={!editedItem || Object.keys(editedItem).length === 0}
                                 onDragStop={handleDragItem}
                                 draggableCancel='.option-control__button, .inventory-options__edit-button, .inventory-options__delete-button, .row-edit'
                             >
                                 {inventoryOptions.map((item, index) => (
                                     <div
                                         key={item.itemuid || `${index}`}
-                                        className={`cursor-move ${
+                                        className={`cursor-pointer ${
                                             index < Math.ceil(inventoryOptions.length / 2)
                                                 ? "mr-2"
                                                 : "pl-3"

@@ -1,9 +1,32 @@
 import { DEBOUNCE_TIME } from "common/settings";
 import { FilterOptions } from "dashboard/common/filter";
+import { typeGuards } from "common/utils";
+
+export enum DateFormat {
+    MM_DD_YYYY = "MM/DD/YYYY",
+    DD_MM_YYYY = "DD/MM/YYYY",
+}
+
+export enum DateSeparator {
+    DOT = ".",
+    SLASH = "/",
+}
+
+export enum DateReturnType {
+    DATE = "date",
+    DATE_WITH_TIME = "date-with-time",
+    TIMESTAMP = "timestamp",
+}
+
+export interface DateFormatOptions {
+    returnType?: DateReturnType;
+    separator?: DateSeparator;
+    format?: DateFormat;
+}
 
 export const isObjectValuesEmpty = (obj: Record<string, string | number>) =>
     Object.values(obj).every((value) =>
-        typeof value === "string" ? !value.trim().length : !value
+        typeGuards.isString(value) ? !value.trim().length : !value
     );
 
 export const filterParams = (
@@ -11,9 +34,7 @@ export const filterParams = (
 ): Record<string, string | number> => {
     return Object.fromEntries(
         Object.entries(obj).filter(([_, value]) =>
-            typeof value === "string"
-                ? value.trim().length > 0
-                : value !== null && value !== undefined
+            typeGuards.isString(value) ? value.trim().length > 0 : typeGuards.isExist(value)
         )
     );
 };
@@ -101,7 +122,7 @@ export const formatCurrency = (
 ): string => {
     const { digitsAfterDecimal = 2 } = options;
 
-    if (typeof value === "string") {
+    if (typeGuards.isString(value)) {
         value = Number(value);
     }
 
@@ -118,19 +139,13 @@ export const centsToDollars = (cents: number): number => {
     return Number(dollars.toFixed(2));
 };
 
-export const setCursorToStart = (element: HTMLInputElement | null) => {
-    if (element) {
-        setTimeout(() => element.setSelectionRange(0, 0), 0);
-    }
-};
-
 export const truncateText = (text: string, maxLength: number = 30) => {
     return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
 };
 
-export const formatDateForServer = (date: Date | number): string => {
+export const formatDateForServer = (date: Date | number, withTimeZone?: boolean): string => {
     const parsedDate = new Date(date);
-    const pad = (num: number) => num.toString().padStart(2, "0");
+    const padNumber = (num: number) => num.toString().padStart(2, "0");
 
     const { month, day, year, hours, minutes, seconds } = {
         month: parsedDate.getMonth() + 1,
@@ -141,24 +156,56 @@ export const formatDateForServer = (date: Date | number): string => {
         seconds: parsedDate.getSeconds(),
     };
 
-    return `${pad(month)}/${pad(day)}/${year} ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    const base = `${padNumber(month)}/${padNumber(day)}/${year} ${padNumber(hours)}:${padNumber(minutes)}:${padNumber(seconds)}`;
+
+    if (!withTimeZone) return base;
+
+    const timeZoneOffsetMinutes = -parsedDate.getTimezoneOffset();
+    const sign = timeZoneOffsetMinutes >= 0 ? "+" : "-";
+    const roundedMinutes = Math.abs(timeZoneOffsetMinutes);
+    const timeZoneHours = Math.floor(roundedMinutes / 60);
+    const timeZoneMinutes = roundedMinutes % 60;
+    const timeZone = `${sign}${padNumber(timeZoneHours)}:${padNumber(timeZoneMinutes)}`;
+
+    return `${base}${timeZone}`;
 };
 
-export const parseDateFromServer = (dateString: string | number | undefined | null): number => {
-    if (!dateString) return 0;
+export const parseDateFromServer = (
+    date: string | number | undefined | null,
+    options: DateFormatOptions = {
+        returnType: DateReturnType.TIMESTAMP,
+        separator: DateSeparator.SLASH,
+        format: DateFormat.DD_MM_YYYY,
+    }
+): number | string => {
+    if (!date) return 0;
 
-    if (typeof dateString === "number") {
-        return dateString;
+    if (typeGuards.isNumber(date)) {
+        return date;
     }
 
-    if (typeof dateString !== "string" || dateString.trim() === "") {
+    if (!typeGuards.isString(date) || date.trim() === "") {
         return 0;
     }
 
     try {
-        const parts = dateString.split(" ");
+        const parts = date.split(" ");
         const dateParts = parts[0].split("/");
         const timeParts = parts[1] ? parts[1].split(":") : ["0", "0", "0"];
+
+        if (options.returnType === DateReturnType.DATE) {
+            const day = parseInt(dateParts[options.format === DateFormat.DD_MM_YYYY ? 1 : 0]);
+            const month = parseInt(dateParts[options.format === DateFormat.DD_MM_YYYY ? 0 : 1]);
+            const year = parseInt(dateParts[options.format === DateFormat.DD_MM_YYYY ? 2 : 1]);
+
+            const padNumber = (num: number) => num.toString().padStart(2, "0");
+
+            return `${padNumber(day)}${options.separator || DateSeparator.SLASH}${padNumber(month)}${options.separator || DateSeparator.SLASH}${year}`;
+        }
+
+        if (options.returnType === DateReturnType.DATE_WITH_TIME) {
+            return `${dateParts[1]}.${dateParts[0]}.${dateParts[2]} ${timeParts[0]}:${timeParts[1]}:${timeParts[2]}`;
+        }
 
         return new Date(
             parseInt(dateParts[2]),
@@ -230,28 +277,32 @@ export const validateDates = (
     return { isValid: true };
 };
 
-export const convertDateForQuery = (dateString: string): string => {
-    const date = new Date(dateString);
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const year = date.getFullYear();
-    return `${month}${day}${year}`;
-};
-
 export const toBinary = (value: boolean): 0 | 1 => (value ? 1 : 0);
 
-export const convertToStandardTimestamp = (dateInput: string | number | Date): number => {
+export const convertToStandardTimestamp = (
+    dateInput?: string | number | Date,
+    withTimeZone: boolean = true
+): number => {
     let date: Date;
 
-    if (typeof dateInput === "string") {
+    if (!typeGuards.isExist(dateInput)) {
+        return new Date().getTime();
+    }
+
+    if (typeGuards.isString(dateInput)) {
         date = new Date(dateInput);
-    } else if (typeof dateInput === "number") {
+    } else if (typeGuards.isNumber(dateInput)) {
         date = new Date(dateInput);
     } else {
         date = dateInput;
     }
 
-    date.setHours(12, 0, 0, 0);
+    if (withTimeZone) {
+        date.setHours(12, 0, 0, 0);
+        return date.getTime();
+    }
+
+    date.setUTCHours(12, 0, 0, 0);
     return date.getTime();
 };
 

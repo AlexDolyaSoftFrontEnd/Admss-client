@@ -96,7 +96,10 @@
 
 .currency-item__icon {
     line-height: 0;
-    font-size: 15px;
+    font-size: 16px;
+    &.currency-item__icon--percent {
+        font-size: 12px;
+    }
 }
 
 .currency-item__input .p-inputnumber-input {
@@ -286,5 +289,21 @@
         transform: translateY(-50%);
         color: var(--admss-app-medium-grey);
         font-size: 16px;
+    }
+}
+
+.global-search {
+    .global-search__input {
+        height: 50px;
+        width: 200px;
+    }
+    .global-search__label {
+        font-weight: 400;
+    }
+}
+
+.text-input {
+    .p-error {
+        bottom: -16px;
     }
 }

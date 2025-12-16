@@ -111,6 +111,11 @@ export interface ReportCreate extends BaseResponseError {
     description: string;
 }
 
+export interface ReportFont {
+    default_size: number;
+    name: string;
+}
+
 export interface ReportServiceColumns {
     data: string;
     dataset: string;
@@ -125,8 +130,8 @@ export interface ReportSetParams extends Omit<Partial<ReportInfo>, "columns"> {
     itemUID: string;
     timestamp?: number;
     timestamp_s?: string;
-    from_date?: string;
-    to_date?: string;
+    from_date?: number;
+    to_date?: number;
     type?: number;
     data?: Record<string, unknown>[];
     format?: Record<string, unknown>;

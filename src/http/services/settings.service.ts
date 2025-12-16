@@ -3,6 +3,7 @@ import { BaseResponseError, Status } from "common/models/base-response";
 import {
     GeneralInventoryOptions,
     GeneralSettings,
+    GeneralSettingsWebExport,
     WatermarkPostProcessing,
 } from "common/models/general-settings";
 import { authorizedUserApiInstance } from "http/index";
@@ -68,23 +69,6 @@ export const getWatermark = async (
     }
 };
 
-export const updateWatermark = async (mediauid: string, body?: any) => {
-    try {
-        const request = await authorizedUserApiInstance.post<any>(
-            `media/${mediauid}/watermark`,
-            body
-        );
-        return request.data;
-    } catch (error) {
-        if (isAxiosError(error)) {
-            return {
-                status: Status.ERROR,
-                error: error.response?.data.error || "Error while updating watermark",
-            };
-        }
-    }
-};
-
 export const getPostProcessing = async (useruid: string) => {
     try {
         const request = await authorizedUserApiInstance.get<WatermarkPostProcessing>(
@@ -96,6 +80,23 @@ export const getPostProcessing = async (useruid: string) => {
             return {
                 status: Status.ERROR,
                 error: error.response?.data.error || "Error while getting postprocessing",
+            };
+        }
+    }
+};
+
+export const getUserExportWebList = async (
+    useruid?: string
+): Promise<GeneralSettingsWebExport[] | BaseResponseError | undefined> => {
+    const url = useruid ? `user/${useruid}/listwebexport` : `user/listwebexport`;
+    try {
+        const request = await authorizedUserApiInstance.get<GeneralSettingsWebExport[]>(url);
+        return request.data;
+    } catch (error) {
+        if (isAxiosError(error)) {
+            return {
+                status: Status.ERROR,
+                error: error.response?.data.error || "Error while getting user export web list",
             };
         }
     }
@@ -172,6 +173,24 @@ export const restoreInventoryGroupDefaults = async (groupuid: string) => {
                 status: Status.ERROR,
                 error:
                     error.response?.data.error || "Error while restoring inventory group defaults",
+            };
+        }
+    }
+};
+
+export const setUserExportWebList = async (
+    useruid?: string,
+    body?: Partial<GeneralSettingsWebExport>[]
+) => {
+    const url = useruid ? `user/${useruid}/webexport` : `user/webexport`;
+    try {
+        const request = await authorizedUserApiInstance.post<BaseResponseError>(url, body);
+        return request.data;
+    } catch (error) {
+        if (isAxiosError(error)) {
+            return {
+                status: Status.ERROR,
+                error: error.response?.data.error || "Error while setting user export web list",
             };
         }
     }

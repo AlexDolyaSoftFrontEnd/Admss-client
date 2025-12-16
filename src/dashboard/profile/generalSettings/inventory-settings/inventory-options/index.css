@@ -23,6 +23,9 @@
         .settings-inventory__name {
             flex: 1;
         }
+        background: var(--admss-app-light-blue);
+        font-weight: 600;
+        height: 60px;
     }
     .option-control {
         display: flex;
@@ -54,7 +57,7 @@
     }
 
     .inventory-options__delete.p-button.p-button-text:enabled:hover {
-        color: var(--admss-darkest-grey);
+        color: var(--admss-app-darkest-grey);
 
         background: transparent;
     }

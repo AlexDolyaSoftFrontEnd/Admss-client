@@ -3,6 +3,8 @@ import { InputText } from "primereact/inputtext";
 import { ReactElement, useEffect, useMemo, useRef } from "react";
 import "./index.css";
 import { DateInput } from "dashboard/common/form/inputs";
+import { useFormikContext } from "formik";
+import { PartialContact } from "dashboard/contacts/form";
 import {
     FileUpload,
     FileUploadHeaderTemplateOptions,
@@ -25,10 +27,13 @@ import { InputMask } from "primereact/inputmask";
 import { BaseResponseError, Status } from "common/models/base-response";
 import { ComboBox } from "dashboard/common/form/dropdown";
 import { DLSides, SexList } from "common/constants/contract-options";
+import { TruncatedText } from "dashboard/common/display";
 
 export const ContactsIdentificationInfo = observer((): ReactElement => {
     const { id } = useParams();
     const store = useStore().contactStore;
+    const { values, errors, setFieldValue, setFieldTouched, handleBlur } =
+        useFormikContext<PartialContact>();
     const {
         contact,
         contactExtData,
@@ -220,18 +225,28 @@ export const ContactsIdentificationInfo = observer((): ReactElement => {
                     />
                 </div>
 
-                <div className='col-3'>
+                <div className='col-3 relative'>
                     <span className='p-float-label'>
                         <InputMask
+                            name='Buyer_SS_Number'
                             mask='999-99-9999'
-                            className='identification-info__text-input w-full'
-                            value={contactExtData.Buyer_SS_Number || ""}
-                            onChange={({ target: { value } }) => {
+                            autoClear={false}
+                            className={`identification-info__text-input w-full ${
+                                errors.Buyer_SS_Number ? "p-invalid" : ""
+                            } ${values.Buyer_SS_Number ? "p-filled" : ""}`}
+                            value={values.Buyer_SS_Number || ""}
+                            onBlur={handleBlur}
+                            onChange={async ({ target: { value } }) => {
+                                await setFieldValue("Buyer_SS_Number", value);
                                 changeContactExtData("Buyer_SS_Number", String(value));
+                                setFieldTouched("Buyer_SS_Number", true, true);
                             }}
                         />
                         <label className='float-label'>Social Security Number</label>
                     </span>
+                    <small className='p-error'>
+                        <TruncatedText text={errors?.Buyer_SS_Number || ""} />
+                    </small>
                 </div>
 
                 <div className='col-3'>

@@ -1,42 +1,40 @@
 import { observer } from "mobx-react-lite";
-import { ReactElement, useRef, useState, useEffect, useMemo } from "react";
+import { ReactElement, useRef, useState, useMemo } from "react";
 import { useStore } from "store/hooks";
 import { useParams } from "react-router-dom";
 import { Contact, ContactExtData, ContactOFAC, ScanBarcodeDL } from "common/models/contact";
 import { checkContactOFAC, scanContactDL } from "http/services/contacts-service";
 import { Checkbox } from "primereact/checkbox";
 import { Button } from "primereact/button";
-import { useToast } from "dashboard/common/toast";
 import { Status } from "common/models/base-response";
-import { TOAST_LIFETIME } from "common/settings";
 import { TextInput } from "dashboard/common/form/inputs";
 import { useFormikContext } from "formik";
 import { parseCustomDate } from "common/helpers";
 import { SexList } from "common/constants/contract-options";
 import { TOOLTIP_MESSAGE } from "dashboard/contacts/form/general-info/tabs/general";
+import { ERROR_MESSAGES } from "common/constants/error-messages";
+import { Loader } from "dashboard/common/loader";
+import "./index.css";
+import { useToastMessage } from "common/hooks";
 
 export const ContactsGeneralCoBuyerInfo = observer((): ReactElement => {
     const { id } = useParams();
     const store = useStore().contactStore;
     const { contactExtData, changeContactExtData } = store;
 
-    const { errors, setFieldValue, validateField, setFieldTouched } =
+    const { setFieldValue, validateField, setFieldTouched, errors, touched } =
         useFormikContext<ContactExtData>();
-    const toast = useToast();
+    const { showError } = useToastMessage();
     const [allowOverwrite, setAllowOverwrite] = useState<boolean>(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const [savedFirstName, setSavedFirstName] = useState<string>(
-        contactExtData.CoBuyer_First_Name || ""
-    );
-    const [savedLastName, setSavedLastName] = useState<string>(
-        contactExtData.CoBuyer_Last_Name || ""
-    );
-    const [savedMiddleName, setSavedMiddleName] = useState<string>(
-        contactExtData.CoBuyer_Middle_Name || ""
-    );
-    const [savedBusinessName, setSavedBusinessName] = useState<string>(
-        contactExtData.CoBuyer_Emp_Company || ""
-    );
+    const [isScanning, setIsScanning] = useState<boolean>(false);
+
+    const handleFieldChange = async (field: keyof ContactExtData, value: string) => {
+        changeContactExtData(field, value);
+        await setFieldValue(field, value, true);
+        await validateField(field);
+        setFieldTouched(field, true, true);
+    };
 
     const shouldDisableNameFields = useMemo(() => {
         return (
@@ -44,59 +42,13 @@ export const ContactsGeneralCoBuyerInfo = observer((): ReactElement => {
         );
     }, [contactExtData.CoBuyer_Emp_Company]);
 
-    const shouldDisableBusinessName = useMemo(() => {
-        return !!(
-            contactExtData.CoBuyer_First_Name?.trim() || contactExtData.CoBuyer_Last_Name?.trim()
-        );
-    }, [contactExtData.CoBuyer_First_Name, contactExtData.CoBuyer_Last_Name]);
+    const isNameRequired = useMemo(() => {
+        return store.isCoBuyerFieldsFilled;
+    }, [store.isCoBuyerFieldsFilled]);
 
-    useEffect(() => {
-        if (shouldDisableNameFields) {
-            if (contactExtData.CoBuyer_First_Name) {
-                setSavedFirstName(contactExtData.CoBuyer_First_Name);
-                setFieldValue("CoBuyer_First_Name", "");
-                changeContactExtData("CoBuyer_First_Name", "");
-            }
-            if (contactExtData.CoBuyer_Last_Name) {
-                setSavedLastName(contactExtData.CoBuyer_Last_Name);
-                setFieldValue("CoBuyer_Last_Name", "");
-                changeContactExtData("CoBuyer_Last_Name", "");
-            }
-            if (contactExtData.CoBuyer_Middle_Name) {
-                setSavedMiddleName(contactExtData.CoBuyer_Middle_Name);
-                setFieldValue("CoBuyer_Middle_Name", "");
-                changeContactExtData("CoBuyer_Middle_Name", "");
-            }
-        } else {
-            if (!contactExtData.CoBuyer_First_Name && savedFirstName) {
-                setFieldValue("CoBuyer_First_Name", savedFirstName);
-                changeContactExtData("CoBuyer_First_Name", savedFirstName);
-            }
-            if (!contactExtData.CoBuyer_Last_Name && savedLastName) {
-                setFieldValue("CoBuyer_Last_Name", savedLastName);
-                changeContactExtData("CoBuyer_Last_Name", savedLastName);
-            }
-            if (!contactExtData.CoBuyer_Middle_Name && savedMiddleName) {
-                setFieldValue("CoBuyer_Middle_Name", savedMiddleName);
-                changeContactExtData("CoBuyer_Middle_Name", savedMiddleName);
-            }
-        }
-    }, [shouldDisableNameFields]);
-
-    useEffect(() => {
-        if (shouldDisableBusinessName) {
-            if (contactExtData.CoBuyer_Emp_Company) {
-                setSavedBusinessName(contactExtData.CoBuyer_Emp_Company);
-                setFieldValue("CoBuyer_Emp_Company", "");
-                changeContactExtData("CoBuyer_Emp_Company", "");
-            }
-        } else {
-            if (!contactExtData.CoBuyer_Emp_Company && savedBusinessName) {
-                setFieldValue("CoBuyer_Emp_Company", savedBusinessName);
-                changeContactExtData("CoBuyer_Emp_Company", savedBusinessName);
-            }
-        }
-    }, [shouldDisableBusinessName]);
+    const shouldShowNameRequired = useMemo(() => {
+        return isNameRequired && !shouldDisableNameFields;
+    }, [isNameRequired, shouldDisableNameFields]);
 
     const handleScanDL = () => {
         fileInputRef.current?.click();
@@ -106,7 +58,7 @@ export const ContactsGeneralCoBuyerInfo = observer((): ReactElement => {
         const file = event.target.files?.[0];
         if (!file) return;
 
-        store.isLoading = true;
+        setIsScanning(true);
 
         try {
             const response = await scanContactDL(file);
@@ -189,17 +141,11 @@ export const ContactsGeneralCoBuyerInfo = observer((): ReactElement => {
             }
             handleOfacCheck();
         } catch (error) {
-            toast.current?.show({
-                severity: "error",
-                summary: "Error",
-                detail:
-                    error instanceof Error
-                        ? error.message
-                        : "Failed to parse date from driver license",
-                life: TOAST_LIFETIME,
-            });
+            showError(
+                error instanceof Error ? error.message : "Failed to parse date from driver license"
+            );
         } finally {
-            store.isLoading = false;
+            setIsScanning(false);
             event.target.value = "";
         }
     };
@@ -224,27 +170,24 @@ export const ContactsGeneralCoBuyerInfo = observer((): ReactElement => {
         };
         const response = await checkContactOFAC(id, contactData as Contact);
         if (response?.status === Status.ERROR) {
-            toast.current?.show({
-                severity: "error",
-                summary: Status.ERROR,
-                detail: response.error,
-                life: TOAST_LIFETIME,
-            });
+            showError(response.error);
         } else {
             store.coBuyerContactOFAC = response as ContactOFAC;
         }
     };
 
     return (
-        <div className='grid general-info row-gap-2'>
+        <div className='grid general-info row-gap-2 cobuyer-info'>
             <div className='col-12 flex gap-4'>
                 <Button
                     type='button'
-                    label='Scan driver license'
-                    className='general-info__button'
-                    tooltip="Data received from the DL's backside will fill in related fields"
-                    outlined
+                    label={isScanning ? "Scanning" : "Scan driver license"}
+                    className={`general-info__button ${isScanning ? "general-info__button--loading" : ""}`}
+                    tooltip='Data received from the DL’s backside will fill in related fields'
+                    outlined={!isScanning}
                     onClick={handleScanDL}
+                    loading={isScanning}
+                    loadingIcon={<Loader size='small' includeText={false} color='white' />}
                 />
                 <input
                     type='file'
@@ -282,21 +225,24 @@ export const ContactsGeneralCoBuyerInfo = observer((): ReactElement => {
 
             <div className='col-4 relative'>
                 <TextInput
-                    className={`general-info__text-input w-full ${errors.CoBuyer_First_Name ? "p-invalid" : ""}`}
+                    className={`general-info__text-input w-full ${shouldShowNameRequired && touched.CoBuyer_First_Name && (!contactExtData.CoBuyer_First_Name || !contactExtData.CoBuyer_First_Name.trim()) ? "p-invalid" : ""}`}
                     value={contactExtData.CoBuyer_First_Name || ""}
-                    onChange={({ target: { value } }) => {
-                        setFieldValue("CoBuyer_First_Name", value, true).then(() => {
-                            changeContactExtData("CoBuyer_First_Name", value);
-                            validateField("CoBuyer_First_Name");
-                        });
-                    }}
-                    onBlur={handleOfacCheck}
-                    name='First Name'
+                    onChange={({ target: { value } }) =>
+                        handleFieldChange("CoBuyer_First_Name", value)
+                    }
+                    name={`First Name${shouldShowNameRequired ? " (required)" : ""}`}
                     tooltip={shouldDisableNameFields ? TOOLTIP_MESSAGE.PERSON : ""}
                     disabled={shouldDisableNameFields}
                     clearButton
                 />
-                <small className='p-error'>{errors.CoBuyer_First_Name}</small>
+                <small className='p-error'>
+                    {shouldShowNameRequired &&
+                    touched.CoBuyer_First_Name &&
+                    (!contactExtData.CoBuyer_First_Name ||
+                        !contactExtData.CoBuyer_First_Name.trim())
+                        ? ERROR_MESSAGES.REQUIRED
+                        : ""}
+                </small>
             </div>
 
             <div className='col-4 relative'>
@@ -304,52 +250,35 @@ export const ContactsGeneralCoBuyerInfo = observer((): ReactElement => {
                     name='Middle Name'
                     className={`general-info__text-input w-full ${errors.CoBuyer_Middle_Name ? "p-invalid" : ""}`}
                     value={contactExtData.CoBuyer_Middle_Name || ""}
-                    onChange={({ target: { value } }) => {
-                        setFieldValue("CoBuyer_Middle_Name", value, true).then(() => {
-                            changeContactExtData("CoBuyer_Middle_Name", value);
-                            validateField("CoBuyer_Middle_Name");
-                            setFieldTouched("CoBuyer_Middle_Name", true, true);
-                        });
-                    }}
+                    onChange={({ target: { value } }) =>
+                        handleFieldChange("CoBuyer_Middle_Name", value)
+                    }
                     tooltip={shouldDisableNameFields ? TOOLTIP_MESSAGE.PERSON : ""}
                     disabled={shouldDisableNameFields}
                     clearButton
                 />
-                <small className='p-error'>{errors.CoBuyer_Middle_Name}</small>
+                <small className='p-error'>{errors.CoBuyer_Middle_Name || ""}</small>
             </div>
 
             <div className='col-4 relative'>
                 <TextInput
-                    name='Last Name'
-                    className={`general-info__text-input w-full ${errors.CoBuyer_Last_Name ? "p-invalid" : ""}`}
+                    name={`Last Name${shouldShowNameRequired ? " (required)" : ""}`}
+                    className={`general-info__text-input w-full ${shouldShowNameRequired && touched.CoBuyer_Last_Name && (!contactExtData.CoBuyer_Last_Name || !contactExtData.CoBuyer_Last_Name.trim()) ? "p-invalid" : ""}`}
                     value={contactExtData.CoBuyer_Last_Name || ""}
-                    onChange={({ target: { value } }) => {
-                        setFieldValue("CoBuyer_Last_Name", value, true).then(() => {
-                            changeContactExtData("CoBuyer_Last_Name", value);
-                            validateField("CoBuyer_Last_Name");
-                        });
-                    }}
-                    onBlur={handleOfacCheck}
+                    onChange={({ target: { value } }) =>
+                        handleFieldChange("CoBuyer_Last_Name", value)
+                    }
                     tooltip={shouldDisableNameFields ? TOOLTIP_MESSAGE.PERSON : ""}
                     disabled={shouldDisableNameFields}
                     clearButton
                 />
-                <small className='p-error'>{errors.CoBuyer_Last_Name}</small>
-            </div>
-
-            <div className='col-4 relative'>
-                <TextInput
-                    name='Business Name'
-                    className='general-info__text-input w-full'
-                    value={contactExtData.CoBuyer_Emp_Company || ""}
-                    onChange={({ target: { value } }) => {
-                        changeContactExtData("CoBuyer_Emp_Company", value);
-                        setFieldValue("CoBuyer_Emp_Company", value);
-                    }}
-                    tooltip={shouldDisableBusinessName ? TOOLTIP_MESSAGE.BUSINESS : ""}
-                    disabled={shouldDisableBusinessName}
-                    clearButton
-                />
+                <small className='p-error'>
+                    {shouldShowNameRequired &&
+                    touched.CoBuyer_Last_Name &&
+                    (!contactExtData.CoBuyer_Last_Name || !contactExtData.CoBuyer_Last_Name.trim())
+                        ? ERROR_MESSAGES.REQUIRED
+                        : ""}
+                </small>
             </div>
         </div>
     );

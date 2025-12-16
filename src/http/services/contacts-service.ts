@@ -19,14 +19,22 @@ import {
 } from "common/models/inventory";
 import { BaseResponse } from "common/models/base-response";
 
-export const getContacts = async (uid: string, queryParams?: QueryParams) => {
+export const getContacts = async (
+    uid: string,
+    queryParams?: QueryParams
+): Promise<ContactUser[] | BaseResponseError | undefined> => {
     try {
         const request = await authorizedUserApiInstance.get<ContactUser[]>(`contacts/${uid}/list`, {
             params: queryParams,
         });
         return request.data;
     } catch (error) {
-        // TODO: add error handler
+        if (isAxiosError(error)) {
+            return {
+                status: Status.ERROR,
+                error: error.response?.data.error || "Error while getting contacts list",
+            };
+        }
     }
 };
 
@@ -55,10 +63,10 @@ export const getContactInfo = async (uid: string) => {
     }
 };
 
-export const getContactsTypeList = async (uid: string | "0") => {
+export const getContactsTypeList = async (uid?: string) => {
     try {
         const request = await authorizedUserApiInstance.get<ContactsCategories>(
-            `contacts/${uid}/listtypes`
+            `contacts/${uid || "0"}/listtypes`
         );
         if (request.data.status === Status.OK) {
             return request.data?.contact_types;
@@ -124,7 +132,7 @@ export const setContact = async (
                     error.response?.data.info ||
                     error.response?.data.error ||
                     "Error while setting contact",
-                errorField: error.response?.data.errorField,
+                errors: error.response?.data.errors,
             };
         }
     }

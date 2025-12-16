@@ -1,5 +1,5 @@
 import { TabView, TabPanel } from "primereact/tabview";
-import { ReactElement, useEffect } from "react";
+import { ReactElement, useEffect, useState, useRef } from "react";
 import { Button } from "primereact/button";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useStore } from "store/hooks";
@@ -28,7 +28,10 @@ export const DealWashout = observer((): ReactElement | null => {
     const [searchParams, setSearchParams] = useSearchParams();
     const store = useStore().dealStore;
     const toast = useToast();
-    const { inventory, getDeal, getDealWashout } = store;
+    const { inventory, getDeal, getDealWashout, restoreWashoutState, isWashoutStatePreserved } =
+        store;
+    const [showOverlay, setShowOverlay] = useState(false);
+    const cardRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (!id || id === CREATE_DEAL_ID) {
@@ -37,6 +40,9 @@ export const DealWashout = observer((): ReactElement | null => {
         }
 
         getDeal(id);
+        if (isWashoutStatePreserved) {
+            restoreWashoutState();
+        }
         getDealWashout(id);
     }, [id]);
 
@@ -80,10 +86,35 @@ export const DealWashout = observer((): ReactElement | null => {
         }
     }, [tabParam, setSearchParams]);
 
+    useEffect(() => {
+        const handleScroll = () => {
+            const tabPanels = document.querySelector(
+                ".deal-washout .p-tabview-panels"
+            ) as HTMLElement;
+            if (tabPanels) {
+                const { scrollTop, scrollHeight, clientHeight } = tabPanels;
+                const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10;
+                setShowOverlay(!isAtBottom);
+            }
+        };
+
+        const tabPanels = document.querySelector(".deal-washout .p-tabview-panels") as HTMLElement;
+        if (tabPanels) {
+            tabPanels.addEventListener("scroll", handleScroll);
+            handleScroll();
+
+            return () => {
+                tabPanels.removeEventListener("scroll", handleScroll);
+            };
+        }
+    }, []);
+
     const handleSaveWashout = async () => {
         if (!id) return;
         const response = await setDealWashout(id, store.dealWashout);
         if (!response?.error) {
+            store.resetWashoutChanges();
+            store.clearWashoutState();
             toast.current?.show({
                 severity: "success",
                 summary: "Success",
@@ -111,10 +142,13 @@ export const DealWashout = observer((): ReactElement | null => {
             <Button
                 icon='pi pi-times'
                 className='p-button close-button'
-                onClick={() => navigate(DEALS_PAGE.EDIT(id))}
+                onClick={() => {
+                    store.clearWashoutState();
+                    navigate(DEALS_PAGE.EDIT(id));
+                }}
             />
             <div className='col-12'>
-                <div className='card'>
+                <div className='card deal-washout__card'>
                     <div className='card-header flex'>
                         <h2 className='card-header__title uppercase m-0'>Deal Washout</h2>
                         {id && (
@@ -140,7 +174,7 @@ export const DealWashout = observer((): ReactElement | null => {
                             </div>
                         )}
                     </div>
-                    <div className='card-content deal-washout__card grid'>
+                    <div className='card-content grid' ref={cardRef}>
                         <TabView
                             className='deal-washout__tabs'
                             activeIndex={activeIndex}
@@ -160,7 +194,9 @@ export const DealWashout = observer((): ReactElement | null => {
                             </TabPanel>
                         </TabView>
                     </div>
-                    <div className='deal-washout__footer washout-footer form-nav'>
+                    <div
+                        className={`deal-washout__footer washout-footer form-nav ${showOverlay ? "show-overlay" : ""}`}
+                    >
                         <div className='washout-footer__controls'>
                             <ControlButton
                                 variant={BUTTON_VARIANTS.PRINT}
@@ -176,7 +212,10 @@ export const DealWashout = observer((): ReactElement | null => {
                         <div className='washout-footer__buttons'>
                             <Button
                                 className='uppercase px-6 form-nav__button deal-washout__button'
-                                onClick={() => navigate(-1)}
+                                onClick={() => {
+                                    store.clearWashoutState();
+                                    navigate(DEALS_PAGE.EDIT(id));
+                                }}
                                 severity='danger'
                                 outlined
                             >
@@ -185,8 +224,9 @@ export const DealWashout = observer((): ReactElement | null => {
                             <Button
                                 type='button'
                                 onClick={handleSaveWashout}
-                                severity='success'
+                                severity={store.isWashoutChanged ? "success" : "secondary"}
                                 className='uppercase px-6 form-nav__button deal-washout__button'
+                                disabled={!store.isWashoutChanged}
                             >
                                 Save
                             </Button>

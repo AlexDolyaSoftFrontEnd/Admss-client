@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
     getContacts,
     getContactsAmount,
@@ -11,16 +11,15 @@ import {
     DataTableSortEvent,
 } from "primereact/datatable";
 import { Button } from "primereact/button";
-import { InputText } from "primereact/inputtext";
-import { Column, ColumnProps } from "primereact/column";
+import { Column } from "primereact/column";
 import { QueryParams } from "common/models/query-params";
 import { DatatableQueries, initialDataTableQueries } from "common/models/datatable-queries";
 import { useNavigate } from "react-router-dom";
 import "./index.css";
 import { ROWS_PER_PAGE } from "common/settings";
 import { ContactType, ContactTypeNameList, ContactUser } from "common/models/contact";
-import { ContactsUserSettings, ServerUserSettings, TableState } from "common/models/user";
-import { getUserSettings, setUserSettings } from "http/services/auth-user.service";
+import { ContactsUserSettings, TableState } from "common/models/user";
+import { useUserProfileSettings } from "common/hooks/useUserProfileSettings";
 import { makeShortReports } from "http/services/reports.service";
 import { ReportsColumn } from "common/models/reports";
 import { Loader } from "dashboard/common/loader";
@@ -33,8 +32,13 @@ import {
 } from "dashboard/common/dialog/search";
 import { createStringifySearchQuery, formatPhoneNumber, isObjectValuesEmpty } from "common/helpers";
 import { ComboBox } from "dashboard/common/form/dropdown";
+import { GlobalSearchInput } from "dashboard/common/form/inputs";
+import { ColumnSelector, TableColumn } from "dashboard/common/filter";
+import { DropdownChangeEvent } from "primereact/dropdown";
+import { CONTACTS_PAGE } from "common/constants/links";
+import { TruncatedText } from "dashboard/common/display";
 
-interface TableColumnProps extends ColumnProps {
+interface TableColumnsList extends TableColumn {
     field: keyof ContactUser | "fullName";
 }
 
@@ -43,6 +47,7 @@ interface AdvancedSearch {
     username: string;
     type: number;
     phone1: string;
+    phone2: string;
 }
 
 interface ContactsDataTableProps {
@@ -53,13 +58,16 @@ interface ContactsDataTableProps {
     getFullInfo?: (contact: ContactUser) => void;
 }
 
-const renderColumnsData: TableColumnProps[] = [
-    { field: "fullName", header: "Name" },
-    { field: "phone1", header: "Work Phone" },
-    { field: "phone2", header: "Home Phone" },
-    { field: "fullAddress", header: "Address" },
-    { field: "email1", header: "Email" },
-    { field: "created", header: "Created" },
+const alwaysActiveColumns: TableColumnsList[] = [
+    { field: "fullName", header: "Name", checked: true },
+    { field: "phone1", header: "Work Phone", checked: true },
+    { field: "created", header: "Created", checked: true },
+];
+
+const selectableColumns: TableColumnsList[] = [
+    { field: "phone2", header: "Home Phone", checked: false, isSelectable: true },
+    { field: "fullAddress", header: "Address", checked: false, isSelectable: true },
+    { field: "email1", header: "Email", checked: false, isSelectable: true },
 ];
 
 export const ContactsDataTable = ({
@@ -75,8 +83,16 @@ export const ContactsDataTable = ({
     const [globalSearch, setGlobalSearch] = useState<string>("");
     const [contacts, setUserContacts] = useState<ContactUser[]>([]);
     const [lazyState, setLazyState] = useState<DatatableQueries>(initialDataTableQueries);
-    const [serverSettings, setServerSettings] = useState<ServerUserSettings>();
-    const [activeColumns, setActiveColumns] = useState<TableColumnProps[]>(renderColumnsData);
+    const {
+        activeColumns,
+        setActiveColumnsAndSave,
+        serverSettings,
+        setModuleSettings,
+        settingsLoaded,
+    } = useUserProfileSettings<ContactsUserSettings, TableColumnsList>(
+        "contacts",
+        selectableColumns
+    );
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const navigate = useNavigate();
     const store = useStore().contactStore;
@@ -87,8 +103,10 @@ export const ContactsDataTable = ({
     const [buttonDisabled, setButtonDisabled] = useState<boolean>(true);
 
     const printTableData = async (print: boolean = false) => {
+        if (!authUser) return;
         setIsLoading(true);
-        const columns: ReportsColumn[] = renderColumnsData.map((column) => ({
+        const allColumns = [...alwaysActiveColumns, ...activeColumns];
+        const columns: ReportsColumn[] = allColumns.map((column) => ({
             name: column.header as string,
             data: column.field as string,
         }));
@@ -97,41 +115,39 @@ export const ContactsDataTable = ({
             date.getMonth() + 1
         }-${date.getDate()}-${date.getFullYear()}_${date.getHours()}-${date.getMinutes()}`;
 
-        if (authUser) {
-            const data = contacts.map((item) => {
-                const filteredItem: Record<string, any> = {};
-                columns.forEach((column) => {
-                    if (item.hasOwnProperty(column.data)) {
-                        filteredItem[column.data] = item[column.data as keyof typeof item];
-                    }
-                });
-                return filteredItem;
-            });
-            const JSONreport = {
-                name,
-                itemUID: "0",
-                data,
-                columns,
-                format: "",
-            };
-            await makeShortReports(authUser.useruid, JSONreport).then((response) => {
-                const url = new Blob([response], { type: "application/pdf" });
-                let link = document.createElement("a");
-                link.href = window.URL.createObjectURL(url);
-                if (!print) {
-                    link.download = `Report-${name}.pdf`;
-                    link.click();
+        const data = contacts.map((item) => {
+            const filteredItem: Record<string, any> = {};
+            columns.forEach((column) => {
+                if (item.hasOwnProperty(column.data)) {
+                    filteredItem[column.data] = item[column.data as keyof typeof item];
                 }
+            });
+            return filteredItem;
+        });
+        const JSONreport = {
+            name,
+            itemUID: "0",
+            data,
+            columns,
+            format: "",
+        };
+        await makeShortReports(authUser.useruid, JSONreport).then((response) => {
+            const url = new Blob([response], { type: "application/pdf" });
+            let link = document.createElement("a");
+            link.href = window.URL.createObjectURL(url);
+            if (!print) {
+                link.download = `Report-${name}.pdf`;
+                link.click();
+            }
 
-                if (print) {
-                    window.open(
-                        link.href,
-                        "_blank",
-                        "toolbar=yes,scrollbars=yes,resizable=yes,top=100,left=100,width=1280,height=720"
-                    );
-                }
-            });
-        }
+            if (print) {
+                window.open(
+                    link.href,
+                    "_blank",
+                    "toolbar=yes,scrollbars=yes,resizable=yes,top=100,left=100,width=1280,height=720"
+                );
+            }
+        });
         setIsLoading(false);
     };
 
@@ -151,102 +167,104 @@ export const ContactsDataTable = ({
             const updatedParams = { ...params, qry: queryString };
 
             if (total) {
-                getContactsAmount(authUser.useruid, { ...updatedParams, total: 1 }).then(
-                    (response) => {
-                        setTotalRecords(response?.total ?? 0);
-                    }
-                );
+                const response = await getContactsAmount(authUser.useruid, {
+                    ...updatedParams,
+                    total: 1,
+                });
+                setTotalRecords(response?.total ?? 0);
             }
-            getContacts(authUser.useruid, updatedParams).then((response) => {
-                if (Array.isArray(response) && response.length) {
-                    setUserContacts(response);
-                } else {
-                    setUserContacts([]);
-                }
-                setIsLoading(false);
-            });
+            const response = await getContacts(authUser.useruid, updatedParams);
+            if (Array.isArray(response) && response.length) {
+                setUserContacts(response);
+            } else {
+                setUserContacts([]);
+            }
+            setIsLoading(false);
         }
     };
 
-    useEffect(() => {
-        getContactsTypeList("0").then((response) => {
-            if (response) {
-                const types = response as ContactType[];
-                if (types?.length) {
-                    if (contactCategory) {
-                        const category = types?.find((item) => item.name === contactCategory);
-                        setSelectedCategory(category ?? null);
-                    }
-                    setCategories(types);
+    const handleGetContactsTypeList = useCallback(async () => {
+        const response = await getContactsTypeList();
+        if (response) {
+            const types = response as ContactType[];
+            if (types?.length) {
+                if (contactCategory) {
+                    const category = types?.find((item) => item.name === contactCategory);
+                    setSelectedCategory(category ?? null);
                 }
             }
-        });
+            setCategories(types);
+        }
     }, [contactCategory]);
 
+    const getSortColumn = (field: string | undefined) => {
+        if (field === "fullName") {
+            return "userName";
+        }
+        return field;
+    };
+
     useEffect(() => {
+        !categories.length && handleGetContactsTypeList();
+    }, [categories.length, handleGetContactsTypeList]);
+
+    useEffect(() => {
+        if (!authUser) return;
         const params: QueryParams = {
             ...(selectedCategory?.id && { param: selectedCategory.id }),
             ...(lazyState.sortOrder === 1 && { type: "asc" }),
             ...(lazyState.sortOrder === -1 && { type: "desc" }),
             ...(globalSearch && { qry: globalSearch }),
-            ...(lazyState.sortField && { column: lazyState.sortField }),
+            ...(lazyState.sortField && { column: getSortColumn(lazyState.sortField) }),
             skip: lazyState.first,
             top: lazyState.rows,
         };
-        if (authUser) {
-            if (!selectedCategory && contactCategory) {
-                return;
-            }
-            setIsLoading(true);
-
-            handleGetContactsList(params, true);
+        if (!selectedCategory && contactCategory) {
+            return;
         }
-    }, [selectedCategory, lazyState, authUser, globalSearch, contactCategory]);
+        if (!settingsLoaded) {
+            return;
+        }
+        setIsLoading(true);
+
+        handleGetContactsList(params, true);
+    }, [selectedCategory, lazyState, authUser, globalSearch, contactCategory, settingsLoaded]);
 
     useEffect(() => {
-        if (authUser) {
-            getUserSettings(authUser.useruid).then((response) => {
-                if (response?.profile.length) {
-                    let allSettings: ServerUserSettings = {} as ServerUserSettings;
-                    if (response.profile) {
-                        try {
-                            allSettings = JSON.parse(response.profile);
-                        } catch (error) {
-                            allSettings = {} as ServerUserSettings;
-                        }
-                    }
-                    setServerSettings(allSettings);
-                    const { contacts: settings } = allSettings;
-                    settings?.activeColumns &&
-                        setActiveColumns(settings.activeColumns as TableColumnProps[]);
-                    settings?.table &&
-                        setLazyState({
-                            first: settings.table.first || initialDataTableQueries.first,
-                            rows: settings.table.rows || initialDataTableQueries.rows,
-                            page: settings.table.page || initialDataTableQueries.page,
-                            column: settings.table.column || initialDataTableQueries.column,
-                            sortField:
-                                settings.table.sortField || initialDataTableQueries.sortField,
-                            sortOrder:
-                                settings.table.sortOrder || initialDataTableQueries.sortOrder,
-                        });
-                }
+        if (!settingsLoaded || !serverSettings) return;
+
+        const moduleSettings = serverSettings?.contacts;
+        if (!contactCategory && moduleSettings?.selectedCategoriesOptions) {
+            const savedCategory: ContactType[] = moduleSettings.selectedCategoriesOptions;
+            if (Array.isArray(savedCategory) && savedCategory.length) {
+                setSelectedCategory(savedCategory[0]);
+            } else {
+                setSelectedCategory(savedCategory as unknown as ContactType);
+            }
+        }
+        if (moduleSettings?.table) {
+            setLazyState({
+                first: moduleSettings.table.first || initialDataTableQueries.first,
+                rows: moduleSettings.table.rows || initialDataTableQueries.rows,
+                page: moduleSettings.table.page || initialDataTableQueries.page,
+                column: moduleSettings.table.column || initialDataTableQueries.column,
+                sortField: moduleSettings.table.sortField || initialDataTableQueries.sortField,
+                sortOrder: moduleSettings.table.sortOrder || initialDataTableQueries.sortOrder,
             });
         }
-    }, [authUser]);
+    }, [settingsLoaded, serverSettings, contactCategory]);
 
     const changeSettings = (settings: Partial<ContactsUserSettings>) => {
-        if (authUser) {
-            const newSettings = {
-                ...serverSettings,
-                contacts: { ...serverSettings?.contacts, ...settings },
-            } as ServerUserSettings;
-            setServerSettings(newSettings);
-            setUserSettings(authUser.useruid, newSettings);
-        }
+        if (!authUser) return;
+        setModuleSettings(settings);
     };
 
-    const handleOnRowClick = ({ data }: DataTableRowClickEvent) => {
+    const handleOnRowClick = ({ data }: DataTableRowClickEvent): void => {
+        const selectedText = window.getSelection()?.toString();
+
+        if (!!selectedText?.length) {
+            return;
+        }
         if (getFullInfo) {
             getFullInfo(data as ContactUser);
         }
@@ -288,7 +306,7 @@ export const ContactsDataTable = ({
     const handleAdvancedSearch = () => {
         const searchQuery = Object.entries(advancedSearch)
             .filter(([_, value]) => value)
-            .map(([key, value]) => `${value}.${key.replace(/\d+/g, "")}`)
+            .map(([key, value]) => `${value}.${key}`)
             .join("+");
 
         handleGetContactsList({ qry: searchQuery }, true);
@@ -337,92 +355,111 @@ export const ContactsDataTable = ({
         },
         {
             key: "phone1",
-            label: "Phone number",
+            label: "Work phone",
             value: advancedSearch.phone1,
+            type: SEARCH_FIELD_TYPE.NUMBER,
+        },
+        {
+            key: "phone2",
+            label: "Home phone",
+            value: advancedSearch.phone2,
             type: SEARCH_FIELD_TYPE.NUMBER,
         },
     ];
 
     const bodyDataRender = (field: keyof ContactUser | "fullName") => {
-        switch (field) {
-            case "fullName":
-                return renderFullName;
-            case "phone1":
-            case "phone2":
-                return (rowData: ContactUser) => formatPhoneNumber(rowData[field]);
-            default:
-                return undefined;
-        }
+        return (rowData: ContactUser) => {
+            let value = "";
+
+            switch (field) {
+                case "fullName":
+                    value = renderFullName(rowData);
+                    break;
+                case "phone1":
+                case "phone2":
+                    value = formatPhoneNumber(rowData[field]);
+                    break;
+                default:
+                    value = String(rowData[field] || "");
+            }
+
+            return <TruncatedText text={value} withTooltip />;
+        };
+    };
+
+    const handleChangeCategory = (e: DropdownChangeEvent) => {
+        if (contactCategory) return;
+        changeSettings({
+            selectedCategoriesOptions: e.value,
+        });
+        setSelectedCategory(e.value);
     };
 
     return (
         <div className='card-content'>
-            <div className='grid datatable-controls'>
-                <div className='col-6'>
-                    <div className='contact-top-controls'>
-                        <ComboBox
-                            value={selectedCategory}
-                            onChange={(e) => {
-                                if (contactCategory) return;
-                                changeSettings({
-                                    selectedCategoriesOptions: e.value,
-                                });
-                                setSelectedCategory(e.value);
-                            }}
-                            options={categories}
-                            optionLabel='name'
-                            editable
-                            disabled={!!contactCategory}
-                            placeholder='Select Category'
-                            pt={{
-                                wrapper: {
-                                    style: {
-                                        maxHeight: "500px",
-                                    },
-                                },
-                            }}
-                        />
+            <div className='table-controls contact-controls'>
+                <GlobalSearchInput
+                    value={globalSearch}
+                    onChange={(e) => setGlobalSearch(e.target.value)}
+                />
+                <Button
+                    className='contact-top-controls__button m-r-20px'
+                    label='Advanced search'
+                    severity='success'
+                    type='button'
+                    onClick={() => setDialogVisible(true)}
+                />
 
-                        <Button
-                            className='contact-top-controls__button'
-                            icon='icon adms-add-item'
-                            severity='success'
-                            type='button'
-                            tooltip='Add new contact'
-                            onClick={handleCreateContact}
-                        />
-                        <Button
-                            severity='success'
-                            type='button'
-                            icon='icon adms-print'
-                            tooltip='Print contacts form'
-                            onClick={() => printTableData(true)}
-                        />
-                        <Button
-                            severity='success'
-                            type='button'
-                            icon='icon adms-download'
-                            tooltip='Download contacts form'
-                            onClick={() => printTableData()}
-                        />
-                    </div>
-                </div>
-                <div className='col-6 text-right'>
-                    <Button
-                        className='contact-top-controls__button m-r-20px'
-                        label='Advanced search'
-                        severity='success'
-                        type='button'
-                        onClick={() => setDialogVisible(true)}
-                    />
-                    <span className='p-input-icon-right'>
-                        <i className='icon adms-search' />
-                        <InputText
-                            value={globalSearch}
-                            onChange={(e) => setGlobalSearch(e.target.value)}
-                        />
-                    </span>
-                </div>
+                <Button
+                    className='contact-top-controls__button'
+                    icon='icon adms-add-item'
+                    severity='success'
+                    type='button'
+                    tooltip='Add new contact'
+                    onClick={handleCreateContact}
+                />
+                <Button
+                    severity='success'
+                    type='button'
+                    icon='icon adms-print'
+                    tooltip='Print contacts form'
+                    onClick={() => printTableData(true)}
+                />
+                <Button
+                    severity='success'
+                    type='button'
+                    icon='icon adms-download'
+                    tooltip='Download contacts form'
+                    onClick={() => printTableData()}
+                />
+
+                <ComboBox
+                    value={selectedCategory}
+                    onChange={handleChangeCategory}
+                    options={categories}
+                    optionLabel='name'
+                    editable
+                    disabled={!!contactCategory}
+                    placeholder='Category'
+                    className='category-selector ml-auto'
+                    pt={{
+                        wrapper: {
+                            style: {
+                                maxHeight: "500px",
+                            },
+                        },
+                    }}
+                />
+                <ColumnSelector<TableColumnsList>
+                    selectableColumns={selectableColumns}
+                    activeColumns={activeColumns}
+                    onColumnsChange={(columns) => {
+                        if (settingsLoaded) {
+                            setActiveColumnsAndSave(columns);
+                        }
+                    }}
+                    className='contacts-filter'
+                />
             </div>
             <div className='grid'>
                 <div className='col-12'>
@@ -448,10 +485,10 @@ export const ContactsDataTable = ({
                             sortField={lazyState.sortField}
                             resizableColumns
                             reorderableColumns
-                            rowClassName={() => "hover:text-primary cursor-pointer"}
+                            rowClassName={() => "table-row"}
                             onRowClick={handleOnRowClick}
                             onColReorder={(event) => {
-                                if (authUser && Array.isArray(event.columns)) {
+                                if (authUser && Array.isArray(event.columns) && settingsLoaded) {
                                     const orderArray = event.columns?.map(
                                         (column: any) => column.props.field
                                     );
@@ -465,14 +502,10 @@ export const ContactsDataTable = ({
                                             );
                                         })
                                         .filter(
-                                            (column): column is TableColumnProps => column !== null
-                                        ) as TableColumnProps[];
+                                            (column): column is TableColumnsList => column !== null
+                                        ) as TableColumnsList[];
 
-                                    setActiveColumns(newActiveColumns);
-
-                                    changeSettings({
-                                        activeColumns: newActiveColumns,
-                                    });
+                                    setActiveColumnsAndSave(newActiveColumns);
                                 }
                             }}
                             onColumnResizeEnd={(event) => {
@@ -490,29 +523,91 @@ export const ContactsDataTable = ({
                                 }
                             }}
                         >
-                            {activeColumns.map(({ field, header }) => (
-                                <Column
-                                    field={field}
-                                    header={header}
-                                    key={field}
-                                    sortable
-                                    headerClassName='cursor-move'
-                                    body={bodyDataRender(field)}
-                                    pt={{
-                                        root: {
-                                            style: {
-                                                width: serverSettings?.contacts?.columnWidth?.[
-                                                    field
-                                                ],
-                                                maxWidth:
-                                                    serverSettings?.contacts?.columnWidth?.[field],
-                                                overflow: "hidden",
-                                                textOverflow: "ellipsis",
-                                            },
+                            <Column
+                                bodyStyle={{ textAlign: "center" }}
+                                reorderable={false}
+                                resizeable={false}
+                                body={({ contactuid }: ContactUser) => {
+                                    return (
+                                        <Button
+                                            text
+                                            className='table-edit-button'
+                                            icon='adms-edit-item'
+                                            tooltip='Edit contact'
+                                            tooltipOptions={{ position: "mouse" }}
+                                            onClick={() => navigate(CONTACTS_PAGE.EDIT(contactuid))}
+                                        />
+                                    );
+                                }}
+                                pt={{
+                                    root: {
+                                        style: {
+                                            width: "80px",
                                         },
-                                    }}
-                                />
-                            ))}
+                                    },
+                                }}
+                            />
+                            {alwaysActiveColumns.map(({ field, header }, index) => {
+                                const savedWidth = serverSettings?.contacts?.columnWidth?.[field];
+
+                                return (
+                                    <Column
+                                        field={field}
+                                        header={header}
+                                        key={field}
+                                        sortable
+                                        body={bodyDataRender(field)}
+                                        headerClassName='cursor-move'
+                                        pt={{
+                                            root: {
+                                                style: savedWidth
+                                                    ? {
+                                                          width: `${savedWidth}px`,
+                                                          maxWidth: `${savedWidth}px`,
+                                                          overflow: "hidden",
+                                                          textOverflow: "ellipsis",
+                                                          borderLeft: !index ? "none" : "",
+                                                      }
+                                                    : {
+                                                          overflow: "hidden",
+                                                          textOverflow: "ellipsis",
+                                                          borderLeft: !index ? "none" : "",
+                                                      },
+                                            },
+                                        }}
+                                    />
+                                );
+                            })}
+
+                            {activeColumns.map(({ field, header }: TableColumnsList, index) => {
+                                const savedWidth = serverSettings?.contacts?.columnWidth?.[field];
+
+                                return (
+                                    <Column
+                                        field={field}
+                                        header={header}
+                                        key={field}
+                                        sortable
+                                        headerClassName='cursor-move'
+                                        body={bodyDataRender(field)}
+                                        pt={{
+                                            root: {
+                                                style: savedWidth
+                                                    ? {
+                                                          width: `${savedWidth}px`,
+                                                          maxWidth: `${savedWidth}px`,
+                                                          overflow: "hidden",
+                                                          textOverflow: "ellipsis",
+                                                      }
+                                                    : {
+                                                          overflow: "hidden",
+                                                          textOverflow: "ellipsis",
+                                                      },
+                                            },
+                                        }}
+                                    />
+                                );
+                            })}
                         </DataTable>
                     )}
                 </div>
@@ -534,17 +629,13 @@ export const ContactsDataTable = ({
     );
 };
 
-export default function Contacts() {
+export const Contacts = () => {
     return (
-        <div className='grid'>
-            <div className='col-12'>
-                <div className='card'>
-                    <div className='card-header'>
-                        <h2 className='card-header__title uppercase m-0'>Contacts</h2>
-                    </div>
-                    <ContactsDataTable />
-                </div>
+        <div className='card contacts'>
+            <div className='card-header'>
+                <h2 className='card-header__title uppercase m-0'>Contacts</h2>
             </div>
+            <ContactsDataTable />
         </div>
     );
-}
+};

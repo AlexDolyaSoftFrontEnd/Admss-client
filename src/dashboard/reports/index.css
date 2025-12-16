@@ -318,6 +318,16 @@
     }
 }
 
-.reports-actions__menu.p-menu .p-menuitem-link {
-    height: auto;
+.reports-actions__menu {
+    padding: 0;
+    right: 0;
+    translate: -240px -40px;
+
+    &.reports-actions__wrapper-empty {
+        translate: none;
+    }
+
+    &.p-menu .p-menuitem-link {
+        height: 40px;
+    }
 }

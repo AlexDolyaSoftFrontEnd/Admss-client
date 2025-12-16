@@ -1,31 +1,92 @@
 import { Calendar } from "primereact/calendar";
-import { ReactElement, useEffect, useState } from "react";
+import { ReactElement, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { TasksWidget } from "dashboard/tasks/widget";
 import { useStore } from "store/hooks";
 import { RecentMessages } from "dashboard/home/recent-messages";
+import { LatestUpdates } from "dashboard/home/latest-updates";
 import "./index.css";
+import { getAlerts, setAlert } from "http/services/tasks.service";
+import { useNotification, useToastMessage } from "common/hooks";
+import { Alert } from "common/models/tasks";
+
+const ALERT_SHOWN_KEY = "alert_shown";
 
 export const Home = (): ReactElement => {
     const store = useStore().userStore;
     const { authUser } = store;
     const [isSalesPerson, setIsSalesPerson] = useState(true);
-    useEffect(() => {
-        if (authUser && Object.keys(authUser.permissions).length) {
-            const { permissions } = authUser;
-            const { uaSalesPerson, ...otherPermissions } = permissions;
-            if (Object.values(otherPermissions).some((permission) => permission === 1)) {
-                return setIsSalesPerson(false);
+    const [date] = useState<Date | null>(null);
+    const { showNotification } = useNotification();
+    const { showError } = useToastMessage();
+    const [pendingAlerts, setPendingAlerts] = useState<Alert[]>([]);
+
+    const handleGetGlobalData = useCallback(async () => {
+        if (!authUser || !Object.keys(authUser.permissions).length) return;
+
+        const alertShownKey = `${ALERT_SHOWN_KEY}_${authUser.useruid}`;
+        const wasAlertShown = sessionStorage.getItem(alertShownKey);
+
+        if (!wasAlertShown) {
+            const alerts = await getAlerts(authUser.useruid);
+            if (alerts && Array.isArray(alerts) && alerts.length > 0) {
+                setPendingAlerts(alerts);
             }
-            if (!!uaSalesPerson) setIsSalesPerson(true);
         }
-    }, [authUser, authUser?.permissions]);
-    const [date] = useState(null);
+
+        const { permissions } = authUser;
+        const { uaSalesPerson, ...otherPermissions } = permissions;
+        if (Object.values(otherPermissions).some((permission) => permission === 1)) {
+            return setIsSalesPerson(false);
+        }
+        if (!!uaSalesPerson) setIsSalesPerson(true);
+    }, [authUser]);
+
+    const showNextAlert = useCallback(
+        async (currentAlert: Alert) => {
+            const result = await setAlert(currentAlert.itemuid);
+
+            if (result?.error) {
+                setPendingAlerts([]);
+                const alertShownKey = `${ALERT_SHOWN_KEY}_${authUser!.useruid}`;
+                sessionStorage.setItem(alertShownKey, "true");
+                showError(result.error);
+                return;
+            }
+
+            setPendingAlerts((previousAlerts) => {
+                const remainingAlerts = previousAlerts.slice(1);
+
+                if (remainingAlerts.length === 0 && authUser) {
+                    const alertShownKey = `${ALERT_SHOWN_KEY}_${authUser.useruid}`;
+                    sessionStorage.setItem(alertShownKey, "true");
+                }
+
+                return remainingAlerts;
+            });
+        },
+        [authUser]
+    );
+
+    useEffect(() => {
+        if (pendingAlerts.length > 0) {
+            const currentAlert = pendingAlerts[0];
+            showNotification({
+                type: currentAlert.alerttype,
+                description: currentAlert.description,
+                onAccept: () => showNextAlert(currentAlert),
+            });
+        }
+    }, [pendingAlerts, showNotification, showNextAlert]);
+
+    useEffect(() => {
+        handleGetGlobalData();
+    }, [handleGetGlobalData]);
 
     return (
         <div className='grid home-page'>
             <div className='col-12'>
-                <div className='card'>
+                <div className='card common-tasks'>
                     <div className='card-header'>
                         <h2 className='card-header__title uppercase m-0'>Common tasks</h2>
                     </div>
@@ -81,19 +142,23 @@ export const Home = (): ReactElement => {
                     </div>
                 </div>
             </div>
-            <div className='col-12'>
-                <div className='card'>
+            <div className='col-12 lg:col-8 xl:col-7'>
+                <div className='card home-page__tasks-widget'>
                     <div className='card-content'>
-                        <div className='grid justify-content-between'>
-                            <div className='col-12 md:col-9'>
+                        <div className='grid lg:justify-content-between md:justify-content-center'>
+                            <div className='col-12 lg:col-6 xl:col-7'>
                                 <TasksWidget />
                             </div>
-                            <div className='col-12 md:col-3 md:text-right task-calendar p-0'>
+
+                            <div className='col-12 lg:col-6 xl:col-5 xl:text-right task-calendar p-0'>
                                 <Calendar className='task-calendar__input' value={date} inline />
                             </div>
                         </div>
                     </div>
                 </div>
+            </div>
+            <div className='col-12 lg:col-4 xl:col-5'>
+                <LatestUpdates />
             </div>
             <div className='col-12 xl:col-5'>
                 <RecentMessages />

@@ -1,3 +1,9 @@
+.contacts {
+    .category-selector {
+        width: 230px;
+    }
+}
+
 .contact__card {
     display: flex;
     flex-direction: column;
@@ -5,14 +11,15 @@
     margin-bottom: 45px;
 }
 
-.contact-top-controls {
+.contact-controls {
     display: flex;
     gap: 20px;
+    padding-bottom: 20px;
 }
 
 .contact__accordion {
     border: none;
-    width: 343px;
+    width: var(--admss-app-card-sidebar-width);
 }
 
 .contact__accordion .p-accordion-header .p-accordion-header-link,

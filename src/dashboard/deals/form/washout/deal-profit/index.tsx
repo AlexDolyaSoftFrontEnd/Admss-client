@@ -1,33 +1,26 @@
-import { DealTotalsProfit } from "./totals-profit";
-import { DealProfitCommission } from "./commission";
-import { DealFIProfit } from "./FI-profit";
-import { DealVehicleProfit } from "./vehicle-profit";
 import "./index.css";
 import { observer } from "mobx-react-lite";
 import { InputNumberProps } from "primereact/inputnumber";
 import { ReactElement, useState } from "react";
-import { CurrencyInput } from "dashboard/common/form/inputs";
+import {
+    CURRENCY_OPTIONS,
+    CURRENCY_SELECT_OPTIONS,
+    CurrencyInput,
+} from "dashboard/common/form/inputs";
 import { Checkbox } from "primereact/checkbox";
 import { ComboBox } from "dashboard/common/form/dropdown";
-
-export enum CURRENCY_OPTIONS {
-    DOLLAR = "$",
-    PERCENT = "%",
-}
-
-const CURRENCY_SELECT_OPTIONS = [
-    { label: CURRENCY_OPTIONS.DOLLAR, value: 0 },
-    { label: CURRENCY_OPTIONS.PERCENT, value: 1 },
-];
-
-export enum INCLUDE_OPTIONS {
-    COMMISSION1 = "commission1",
-    COMMISSION = "commission",
-}
+import { DealTotalsProfit } from "dashboard/deals/form/washout/deal-profit/totals-profit";
+import { DealProfitCommission } from "dashboard/deals/form/washout/deal-profit/commission";
+import { DealVehicleProfit } from "dashboard/deals/form/washout/deal-profit/vehicle-profit";
+import { DealProfitFinanceWorksheet } from "dashboard/deals/form/washout/deal-profit/finance-worksheet";
+import { DealInterestProfit } from "dashboard/deals/form/washout/deal-profit/interest-profit";
+import { TruncatedText } from "dashboard/common/display";
+import { useStore } from "store/hooks";
+import { INCLUDE_OPTIONS } from "store/stores/deal";
 
 interface DealProfitItemProps extends InputNumberProps {
     numberSign?: "+" | "-" | "=";
-    currency?: CURRENCY_OPTIONS | string;
+    currency?: CURRENCY_OPTIONS;
     currencySelectValue?: 0 | 1;
     onCurrencySelect?: (value: 0 | 1) => void;
     withInput?: boolean;
@@ -38,6 +31,8 @@ interface DealProfitItemProps extends InputNumberProps {
     includes?: boolean;
     includeCheckbox?: INCLUDE_OPTIONS | null;
     includeCheckboxOnChange?: (value: INCLUDE_OPTIONS | null) => void;
+    includeCheckboxFieldName?: string;
+    additionalValue?: string;
 }
 
 export const DealProfitItem = observer(
@@ -54,29 +49,55 @@ export const DealProfitItem = observer(
         includes = false,
         includeCheckbox,
         includeCheckboxOnChange,
+        includeCheckboxFieldName,
         onCurrencySelect,
+        additionalValue,
         ...props
     }: DealProfitItemProps): ReactElement => {
         const [fieldChanged, setFieldChanged] = useState(false);
+        const { dealWashout, toggleIncludeCheckbox, getIncludeCheckboxValue } =
+            useStore().dealStore;
 
         const handleChange = (event: any) => {
             setFieldChanged(true);
             props.onChange?.(event);
         };
 
+        const handleCurrencySelect = (value: 0 | 1) => {
+            onCurrencySelect?.(value);
+        };
+
         const handleFirstCheckboxChange = () => {
-            if (includeCheckbox === INCLUDE_OPTIONS.COMMISSION1) {
-                includeCheckboxOnChange?.(null);
+            if (includeCheckboxFieldName) {
+                const currentValue = getIncludeCheckboxValue(includeCheckboxFieldName);
+                if (currentValue === INCLUDE_OPTIONS.COMMISSION1) {
+                    toggleIncludeCheckbox(includeCheckboxFieldName, null);
+                } else {
+                    toggleIncludeCheckbox(includeCheckboxFieldName, INCLUDE_OPTIONS.COMMISSION1);
+                }
             } else {
-                includeCheckboxOnChange?.(INCLUDE_OPTIONS.COMMISSION1);
+                if (includeCheckbox === INCLUDE_OPTIONS.COMMISSION1) {
+                    includeCheckboxOnChange?.(null);
+                } else {
+                    includeCheckboxOnChange?.(INCLUDE_OPTIONS.COMMISSION1);
+                }
             }
         };
 
         const handleSecondCheckboxChange = () => {
-            if (includeCheckbox === INCLUDE_OPTIONS.COMMISSION) {
-                includeCheckboxOnChange?.(null);
+            if (includeCheckboxFieldName) {
+                const currentValue = getIncludeCheckboxValue(includeCheckboxFieldName);
+                if (currentValue === INCLUDE_OPTIONS.COMMISSION) {
+                    toggleIncludeCheckbox(includeCheckboxFieldName, null);
+                } else {
+                    toggleIncludeCheckbox(includeCheckboxFieldName, INCLUDE_OPTIONS.COMMISSION);
+                }
             } else {
-                includeCheckboxOnChange?.(INCLUDE_OPTIONS.COMMISSION);
+                if (includeCheckbox === INCLUDE_OPTIONS.COMMISSION) {
+                    includeCheckboxOnChange?.(null);
+                } else {
+                    includeCheckboxOnChange?.(INCLUDE_OPTIONS.COMMISSION);
+                }
             }
         };
 
@@ -93,10 +114,10 @@ export const DealProfitItem = observer(
                         }}
                     />
                 )}
-                <label className='deal-profit__label'>
+                <span className='deal-profit__label'>
                     {numberSign && <span className='deal-profit__sign'>({numberSign})</span>}
                     &nbsp;{title}
-                </label>
+                </span>
                 {withInput ? (
                     <>
                         {currencySelectValue !== undefined && (
@@ -105,18 +126,26 @@ export const DealProfitItem = observer(
                                 optionLabel='label'
                                 optionValue='value'
                                 value={currencySelectValue}
+                                required
                                 onChange={(e) => {
-                                    onCurrencySelect?.(e.value as 0 | 1);
+                                    handleCurrencySelect(e.value as 0 | 1);
                                 }}
-                                className={`deal-profit__currency-select`}
+                                className={`deal-profit__currency-select currency-select`}
+                                panelClassName='currency-select__list'
                             />
                         )}
                         <CurrencyInput
                             currencyIcon={
-                                currency === CURRENCY_OPTIONS.PERCENT ? "percent" : "dollar"
+                                currencySelectValue !== undefined
+                                    ? CURRENCY_SELECT_OPTIONS.find(
+                                          (option) => option.value === currencySelectValue
+                                      )?.label
+                                    : currency
                             }
                             className={`deal-profit__input ${fieldChanged ? "input-change" : ""}`}
                             {...props}
+                            disabled={!checkboxValue}
+                            coloredEmptyValue
                             onChange={handleChange}
                         />
                     </>
@@ -125,20 +154,34 @@ export const DealProfitItem = observer(
                         {currency && <span className='deal-profit__currency'>{currency}</span>}
                         &nbsp;
                         {currency
-                            ? props.value?.toLocaleString("en-US", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
+                            ? TruncatedText({
+                                  withTooltip: true,
+                                  text:
+                                      props.value?.toLocaleString("en-US", {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2,
+                                      }) || "",
+                                  width: "auto",
+                                  className: "deal-profit__value-text",
                               })
                             : props.value}
                     </div>
                 )}
+                {additionalValue && (
+                    <span className='deal-profit__additional-value'>{additionalValue}</span>
+                )}
                 {includes && (
                     <div className='deal-profit__includes'>
-                        {includeCheckbox !== undefined && (
+                        {(includeCheckbox !== undefined || includeCheckboxFieldName) && (
                             <>
                                 <Checkbox
                                     inputId={`${fieldName}-includes-1`}
-                                    checked={includeCheckbox === INCLUDE_OPTIONS.COMMISSION1}
+                                    checked={
+                                        includeCheckboxFieldName
+                                            ? getIncludeCheckboxValue(includeCheckboxFieldName) ===
+                                              "COMMISSION1"
+                                            : includeCheckbox === INCLUDE_OPTIONS.COMMISSION1
+                                    }
                                     tooltip='Include in Commission1 Base'
                                     onChange={() => {
                                         handleFirstCheckboxChange();
@@ -146,8 +189,14 @@ export const DealProfitItem = observer(
                                 />
                                 <Checkbox
                                     inputId={`${fieldName}-includes-2`}
-                                    checked={includeCheckbox === INCLUDE_OPTIONS.COMMISSION}
-                                    tooltip='Include in Commission Base'
+                                    checked={
+                                        includeCheckboxFieldName
+                                            ? getIncludeCheckboxValue(includeCheckboxFieldName) ===
+                                              "COMMISSION"
+                                            : includeCheckbox === INCLUDE_OPTIONS.COMMISSION
+                                    }
+                                    tooltip='Include in Commission2 Base'
+                                    disabled={!dealWashout.salesperson2uid}
                                     onChange={() => {
                                         handleSecondCheckboxChange();
                                     }}
@@ -164,16 +213,19 @@ export const DealProfitItem = observer(
 export const DealProfit = () => {
     return (
         <div className='deal-profit grid'>
-            <div className='col-6'>
+            <div className='col-3 pt-0'>
                 <DealVehicleProfit />
             </div>
-            <div className='col-6'>
+            <div className='col-4 pt-0'>
                 <DealProfitCommission />
             </div>
-            <div className='fi-wrapper'>
-                <DealFIProfit />
+            <div className='col-5 pt-0'>
+                <DealProfitFinanceWorksheet />
             </div>
-            <div className='totals-wrapper'>
+            <div className='col-7'>
+                <DealInterestProfit />
+            </div>
+            <div className='col-5'>
                 <DealTotalsProfit />
             </div>
         </div>

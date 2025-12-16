@@ -1,72 +1,127 @@
-import { ComboBox } from "dashboard/common/form/dropdown";
 import { Card } from "primereact/card";
 import { Checkbox } from "primereact/checkbox";
 import { useState } from "react";
-import { DealProfitItem, INCLUDE_OPTIONS } from "..";
 import { Button } from "primereact/button";
 import { useStore } from "store/hooks";
 import { observer } from "mobx-react-lite";
-import { SalesmanSelectDialog } from "./salesman-select-dialog";
+import { SalesmanSelectDialog } from "dashboard/deals/form/washout/deal-profit/commission/salesman-select-dialog";
+import { DealProfitItem } from "dashboard/deals/form/washout/deal-profit/index";
+import { CURRENCY_OPTIONS, DashboardRadio } from "dashboard/common/form/inputs";
+import { RadioButtonProps } from "primereact/radiobutton";
+import { toBinary } from "common/helpers";
 
-const COMMISSION_2_OPTIONS = [
-    { label: "Figure Before Commission", value: 0 },
-    { label: "Figure After Commission", value: 1 },
+const COMMISSION_2_OPTIONS: RadioButtonProps[] = [
+    {
+        name: "figureAfterCommission",
+        title: "Figure After Commission",
+        value: 0,
+    },
+    {
+        name: "splitCommission1InHalf",
+        title: "Split Commission 1 in half",
+        value: 1,
+    },
+    {
+        name: "figureSeparately",
+        title: "Figure Separately",
+        value: 2,
+    },
 ];
+
+const isOptionSelected = (option: number | string): boolean => {
+    return Number(option) === 1;
+};
 
 export const DealProfitCommission = observer(() => {
     const { dealWashout, changeDealWashout } = useStore().dealStore;
 
-    const [defaultCommission, setDefaultCommission] = useState<boolean>(false);
-    const [managerOverride, setManagerOverride] = useState<boolean>(false);
-    const [s1, setS1] = useState<boolean>(false);
-    const [s2, setS2] = useState<boolean>(false);
-    const [includeManagerOverride, setIncludeManagerOverride] = useState<INCLUDE_OPTIONS | null>(
-        null
+    const [optionAfterIndex, optionSplitIndex, optionSeparatelyIndex] = COMMISSION_2_OPTIONS.map(
+        (option) => option.value
     );
+
+    const getCurrentCommissionOption = () => {
+        const {
+            Comm2OptFigureAfter: optionAfter,
+            Comm2OptSplitCommInHalf: optionSplit,
+            Comm2OptFigureSeparately: optionSeparately,
+            Comm2Options: optionDefault,
+        } = dealWashout;
+
+        if (isOptionSelected(optionAfter)) return optionAfterIndex;
+        if (isOptionSelected(optionSplit)) return optionSplitIndex;
+        if (isOptionSelected(optionSeparately)) return optionSeparatelyIndex;
+        return optionDefault;
+    };
+
+    const handleCommissionOptionChange = (value: string | number) => {
+        const numericValue = Number(value);
+        changeDealWashout("Comm2OptFigureAfter", toBinary(numericValue === optionAfterIndex));
+        changeDealWashout("Comm2OptSplitCommInHalf", toBinary(numericValue === optionSplitIndex));
+        changeDealWashout(
+            "Comm2OptFigureSeparately",
+            toBinary(numericValue === optionSeparatelyIndex)
+        );
+        changeDealWashout("Comm2Options", numericValue);
+    };
+
     const [salesmanSelectDialogVisible, setSalesmanSelectDialogVisible] = useState<boolean>(false);
     const [manager, setManager] = useState<string>("");
     const [salesmanFirst, setSalesmanFirst] = useState<string>("");
     const [salesmanSecond, setSalesmanSecond] = useState<string>("");
+    const [managerOverride, setManagerOverride] = useState<boolean>(false);
+    const [s1, setS1] = useState<boolean>(false);
+    const [s2, setS2] = useState<boolean>(false);
 
     return (
         <Card className='profit-card profit-commission'>
-            <div className='profit-card__header profit-commission__header'>
-                <div className='profit-commission__header-title'>Commission Settings</div>
-                <div className='profit-commission__header-subtitle'>Commission Worksheet</div>
-            </div>
-            <div className='profit-card__body profit-commission__body'>
+            <h3 className='profit-card__header profit-commission__header'>Commission Settings</h3>
+
+            <article className='profit-card__body profit-commission__body'>
                 <div className='profit-commission__settings commission-settings'>
-                    <div className='commission-settings__item'>
-                        <div className='commission-settings__label'>Commission 2 Options:</div>
-                        <ComboBox
-                            options={COMMISSION_2_OPTIONS}
-                            optionLabel='label'
-                            optionValue='value'
-                            value={dealWashout.Comm2Options}
-                            onChange={({ value }) => {
-                                changeDealWashout("Comm2Options", value);
-                            }}
-                            className='commission-settings__input w-full'
-                        />
-                    </div>
-                    <div className='commission-settings__checkbox mt-2'>
-                        <Checkbox
-                            inputId='set-default'
-                            checked={defaultCommission}
-                            onChange={({ checked }) => {
-                                setDefaultCommission(!!checked);
-                            }}
-                        />
-                        <label htmlFor='set-default'>Set this as the Default</label>
-                    </div>
+                    <div className='commission-settings__title'>Commission 2 Options:</div>
+
+                    <DashboardRadio
+                        radioArray={COMMISSION_2_OPTIONS}
+                        wrapperClassName='commission-settings__radio'
+                        rowGap={2}
+                        columnGap={2}
+                        initialValue={getCurrentCommissionOption()}
+                        onChange={handleCommissionOptionChange}
+                        children={
+                            <div className='commission-settings__checkbox'>
+                                <Checkbox
+                                    inputId='set-default'
+                                    checked={Number(dealWashout.Comm2OptionsDef) === 1}
+                                    onChange={({ checked }) => {
+                                        changeDealWashout(
+                                            "Comm2OptionsDef",
+                                            String(checked ? 1 : 0)
+                                        );
+                                    }}
+                                />
+                                <label htmlFor='set-default'>Set this as the Default</label>
+                            </div>
+                        }
+                    />
                 </div>
-                <div className='profit-commission__worksheet commission-worksheet'>
+            </article>
+
+            <h3 className='profit-card__header profit-commission__header'>Commission Worksheet</h3>
+
+            <article className='profit-card__body profit-commission__body'>
+                <div className='profit-commission__worksheet'>
+                    <Button
+                        icon='adms-salesman'
+                        label='Select Salesman'
+                        className='profit-commission__salesman-button'
+                        onClick={() => setSalesmanSelectDialogVisible(true)}
+                    />
                     <DealProfitItem
                         title='Commission Base:'
                         className='deal-profit__item--blue'
                         value={Number(dealWashout.CommissionBase) || 0}
-                        currency='$'
-                        justify='start'
+                        includes
+                        currency={CURRENCY_OPTIONS.DOLLAR}
                         fieldName='commissionBase'
                         onChange={({ value }) => {
                             changeDealWashout("CommissionBase", String(value));
@@ -74,24 +129,21 @@ export const DealProfitCommission = observer(() => {
                     />
                     <DealProfitItem
                         title='Manager Override:'
-                        value={Number(dealWashout.CommissionMgr) || 0}
+                        value={Number(dealWashout.CommissionMgrOverride) || 0}
                         withInput
-                        justify='start'
                         includes
-                        includeCheckbox={includeManagerOverride}
-                        includeCheckboxOnChange={setIncludeManagerOverride}
+                        includeCheckboxFieldName='CommissionMgrOverride'
                         checkboxValue={managerOverride}
                         checkboxOnChange={setManagerOverride}
                         fieldName='managerOverride'
                         onChange={({ value }) => {
-                            changeDealWashout("CommissionMgr", String(value));
+                            changeDealWashout("CommissionMgrOverride", String(value));
                         }}
                     />
                     <DealProfitItem
                         title='S1: (None Selected)'
                         value={Number(dealWashout.Commission1) || 0}
                         withInput
-                        justify='start'
                         includes
                         checkboxValue={s1}
                         checkboxOnChange={setS1}
@@ -104,7 +156,6 @@ export const DealProfitCommission = observer(() => {
                         title='S2: (None Selected)'
                         value={Number(dealWashout.Commission2) || 0}
                         withInput
-                        justify='start'
                         includes
                         checkboxValue={s2}
                         checkboxOnChange={setS2}
@@ -119,24 +170,19 @@ export const DealProfitCommission = observer(() => {
                     </div>
 
                     <DealProfitItem
-                        title='(=) Commission Profit:'
+                        title='(=) Commission Total:'
                         value={Number(dealWashout.CommissionTotal) || 0}
-                        currency='$'
-                        justify='start'
-                        className='deal-profit__item--blue'
+                        currency={CURRENCY_OPTIONS.DOLLAR}
+                        className='deal-profit__summary deal-profit__item--blue deal-profit__item--bold'
                         fieldName='commissionProfit'
+                        includes
                         onChange={({ value }) => {
                             changeDealWashout("CommissionTotal", String(value));
                         }}
                     />
                 </div>
-                <Button
-                    icon='pi pi-user-plus'
-                    tooltip='Select Salesman'
-                    className='profit-commission__salesman-button'
-                    onClick={() => setSalesmanSelectDialogVisible(true)}
-                />
-            </div>
+            </article>
+
             {salesmanSelectDialogVisible && (
                 <SalesmanSelectDialog
                     manager={manager}

@@ -1,7 +1,4 @@
-import { Status } from "common/models/base-response";
 import { ReportDocument, ReportCollection } from "common/models/reports";
-import { TOAST_LIFETIME } from "common/settings";
-import { useToast } from "dashboard/common/toast";
 import {
     addReportToCollection,
     moveReportToCollection,
@@ -10,29 +7,32 @@ import {
 import { Button } from "primereact/button";
 import { Menu } from "primereact/menu";
 import { MenuItem } from "primereact/menuitem";
-import { ReactElement, useState, useRef, useMemo } from "react";
+import { ReactElement, useState, useRef, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { EditAccessDialog } from "dashboard/reports/common/access-dialog";
 import { useStore } from "store/hooks";
+import { useToastMessage } from "common/hooks";
+import { REPORTS_PAGE } from "common/constants/links";
 
 interface ActionButtonsProps {
     report: ReportDocument;
-    tooltip?: string;
     currentCollectionUID?: string;
     collectionList?: ReportCollection[];
     refetchCollectionsAction?: () => void;
+    onBeforeEdit?: () => Promise<void> | void;
 }
 
 export const ActionButtons = ({
-    tooltip,
     report,
     currentCollectionUID,
     refetchCollectionsAction,
     collectionList,
+    onBeforeEdit,
 }: ActionButtonsProps): ReactElement => {
     const [editAccessActive, setEditAccessActive] = useState(false);
     const [addedToCollection, setAddedToCollection] = useState(false);
-    const toast = useToast();
+    const [isMenuVisible, setIsMenuVisible] = useState(false);
+    const { showError, showSuccess } = useToastMessage();
     const menu = useRef<Menu>(null!);
     const navigate = useNavigate();
     const handleEditAccess = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -64,13 +64,8 @@ export const ActionButtons = ({
                                   collection.itemUID,
                                   report.documentUID
                               );
-                              if (response?.status === Status.ERROR) {
-                                  toast.current?.show({
-                                      severity: "error",
-                                      summary: Status.ERROR,
-                                      detail: response?.error,
-                                      life: TOAST_LIFETIME,
-                                  });
+                              if (response && response.error) {
+                                  showError(response.error);
                               } else {
                                   setAddedToCollection(true);
                                   refetchCollectionsAction?.();
@@ -83,13 +78,8 @@ export const ActionButtons = ({
                                   report.documentUID,
                                   collection.itemUID
                               );
-                              if (response?.status === Status.ERROR) {
-                                  toast.current?.show({
-                                      severity: "error",
-                                      summary: Status.ERROR,
-                                      detail: response?.error,
-                                      life: TOAST_LIFETIME,
-                                  });
+                              if (response && response.error) {
+                                  showError(response.error);
                               } else {
                                   refetchCollectionsAction?.();
                               }
@@ -116,37 +106,49 @@ export const ActionButtons = ({
             ...report,
             isfavorite: !report.isfavorite ? 1 : 0,
         }).then((response) => {
-            if (response && response.status === Status.ERROR) {
-                toast.current?.show({
-                    severity: "error",
-                    summary: Status.ERROR,
-                    detail: response.error || "Error while changing report favorite status",
-                    life: TOAST_LIFETIME,
-                });
+            if (response && response.error) {
+                showError(response.error || "Error while changing report favorite status");
             } else {
                 const detail = !!report.isfavorite
                     ? "Report is successfully removed from Favorites!"
                     : "Report is successfully added to Favorites!";
                 refetchCollectionsAction?.();
-                toast.current?.show({
-                    severity: "success",
-                    summary: "Success",
-                    detail,
-                    life: TOAST_LIFETIME,
-                });
+                showSuccess(detail);
             }
         });
     };
 
-    const handleEditReport = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const handleEditReport = async (event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
-        navigate(`/dashboard/reports/${report.documentUID}`);
+        if (onBeforeEdit) {
+            await onBeforeEdit();
+        }
+        navigate(REPORTS_PAGE.EDIT(report.documentUID));
     };
 
     const handleAddToCollection = (event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
+        setIsMenuVisible(!isMenuVisible);
         menu.current.toggle(event);
     };
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as Node;
+            const menuElement = menu.current?.getTarget() as Element;
+            if (isMenuVisible && menuElement && !menuElement.contains(target)) {
+                menu?.current?.hide(event as unknown as React.SyntheticEvent);
+            }
+        };
+
+        if (isMenuVisible) {
+            document.addEventListener("mousedown", handleClickOutside);
+        }
+
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+        };
+    }, [isMenuVisible]);
 
     return (
         <>
@@ -156,11 +158,12 @@ export const ActionButtons = ({
                     popup
                     ref={menu}
                     className='reports-actions__menu'
+                    onHide={() => setIsMenuVisible(false)}
                     pt={{
                         root: {
                             style: {
                                 width: !collectionList?.length ? "176px" : "240px",
-                                maxHeight: "240px",
+                                maxHeight: "200px",
                                 overflowY: !collectionList?.length ? "hidden" : "auto",
                                 overflowX: "hidden",
                                 paddingTop: 0,

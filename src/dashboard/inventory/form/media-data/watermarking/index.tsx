@@ -7,16 +7,19 @@ import { Accordion, AccordionTab } from "primereact/accordion";
 import { useStore } from "store/hooks";
 import { GeneralSettings, WatermarkPostProcessing } from "common/models/general-settings";
 import { observer } from "mobx-react-lite";
-import { InputText } from "primereact/inputtext";
 import { InputTextarea } from "primereact/inputtextarea";
 import { ImagePreview } from "dashboard/inventory/form/media-data/watermarking/preview";
 import { useParams } from "react-router-dom";
+import { getReportFonts } from "http/services/reports.service";
+import { ReportFont } from "common/models/reports";
+import { ComboBox } from "dashboard/common/form/dropdown";
 
 export const InventoryMediaWatermarking = observer((): ReactElement => {
     const { id } = useParams();
-    const [settingsStore, inventoryStore] = [
+    const [settingsStore, inventoryStore, userStore] = [
         useStore().generalSettingsStore,
         useStore().inventoryStore,
+        useStore().userStore,
     ];
     const {
         settings,
@@ -30,11 +33,20 @@ export const InventoryMediaWatermarking = observer((): ReactElement => {
     } = settingsStore;
     const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
     const [hasChanges, setHasChanges] = useState<boolean>(false);
+    const [fonts, setFonts] = useState<ReportFont[]>([]);
+
+    const handleGetFonts = async () => {
+        const response = await getReportFonts(userStore.authUser?.useruid ?? "");
+        if (Array.isArray(response)) {
+            setFonts(response);
+        }
+    };
 
     useEffect(() => {
         if (id) {
             getSettings();
             getPostProcessing();
+            handleGetFonts();
         }
     }, [id]);
 
@@ -60,7 +72,6 @@ export const InventoryMediaWatermarking = observer((): ReactElement => {
     const handleRestoreDefault = () => {
         restoreDefaultSettings();
         setHasChanges(false);
-        inventoryStore.isFormChanged = false;
     };
 
     const handleDeleteTextBlock = (index: number) => {
@@ -108,6 +119,16 @@ export const InventoryMediaWatermarking = observer((): ReactElement => {
 
     const handleClosePreview = () => {
         setIsPreviewOpen(false);
+    };
+
+    const handleFontNameChange = (blockIndex: number, fontName: string) => {
+        const newTextBlocks = [...postProcessing];
+        newTextBlocks[blockIndex] = {
+            ...newTextBlocks[blockIndex],
+            fontName: fontName,
+            fontSize: fonts.find((font) => font.name === fontName)?.default_size || 0,
+        };
+        handlePostProcessingChange(newTextBlocks);
     };
 
     const renderTextBlocks = () => {
@@ -162,13 +183,12 @@ export const InventoryMediaWatermarking = observer((): ReactElement => {
                         <label className='float-label'>Text String</label>
                     </span>
                     <div className='col-12 p-0 flex align-items-center justify-content-between'>
-                        <span className='p-float-label watermarking__font-input'>
-                            <InputText
+                        <span className='p-float-label watermarking__font-dropdown'>
+                            <ComboBox
+                                options={fonts.map((font) => font.name)}
                                 value={block.fontName || ""}
                                 onChange={(e) => {
-                                    const newTextBlocks = [...postProcessing];
-                                    newTextBlocks[index] = { ...block, fontName: e.target.value };
-                                    handlePostProcessingChange(newTextBlocks);
+                                    handleFontNameChange(index, e.target.value);
                                 }}
                             />
                             <label className='float-label'>Font name</label>

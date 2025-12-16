@@ -4,14 +4,21 @@
     --admss-app-font-weight: 400;
     --admss-app-base-font-size: 18px;
 
+    --admss-app-screen-xl: 1540px;
+    --admss-app-screen-lg: 1200px;
+    --admss-app-screen-md: 768px;
+    --admss-app-screen-sm: 600px;
+
     --admss-app-aside-collapsed-width: 84px;
-    --admss-app-aside-expanded-width: 201px;
+    --admss-app-aside-expanded-width: 228px;
     --admss-app-content-top-margin: 50px;
     --admss-app-header-height: 108px;
     --admss-app-dialog-border-radius: 15px;
     --admss-app-container-width: 91vw;
     --admss-app-container-width-collapsed: 1539px;
     --admss-app-container-width-expanded: 1670px;
+
+    --admss-app-card-sidebar-width: 475px;
 
     --admss-app-main-blue: #295dc2;
     --admss-app-primary: #292b2e;
@@ -22,25 +29,29 @@
     --admss-app-medium-light-blue: #cfdbf4;
     --admss-app-medium-blue: #afc6f3;
     --admss-app-dark-blue: #7e9cd6;
+    --admss-app-light-dusty-blue: #e0f5fa;
     --admss-app-dusty-blue: #00839f;
+    --admss-app-button-dusty-blue: #55cde6;
     --admss-app-darkest-blue: #37455c;
     --admss-app-deep-blue: #292c33;
     --admss-app-focus-blue: #eef4ff;
     --admss-app-ultra-deep-blue: #000a66;
     --admss-app-warning-blue: #0040bd;
     --admss-app-blue-violet: #2a359b;
+    --admss-app-light-blue-violet: #d9dcf4;
+    --admss-app-lightest-blue-violet: #f1f3ff;
     --admss-app-blue-text: #292a2e;
 
     --admss-app-light-grey: #cccccc;
     --admss-app-lightest-grey: #e7e7e7;
     --admss-app-medium-grey: #a4a6a8;
-    --admss-darkest-grey: #5f5f5f;
+    --admss-app-darkest-grey: #5f5f5f;
 
     --admss-app-success: #28a745;
     --admss-app-green: #15c35b;
     --admss-app-dark-green: #5ed69d;
     --admss-app-focus-green: #c3ffe3;
-    --admss-app-light-green: #effff7;
+    --admss-app-light-green: #e8f9e6;
     --admss-app-lightest-green: #fafffc;
     --admss-app-primary-main-green: #0db564;
     --admss-app-warning-green: #148d00;
@@ -56,8 +67,14 @@
     --admss-app-focus-red: #ffc3c3;
     --admss-app-light-red: #ffe9e9;
 
+    --admss-app-light-purple: #f3ddf9;
     --admss-app-deep-purple: #852a9b;
+    --admss-app-focus-purple: #de5bff;
 
+    --admss-app-lavender: #9b49ff;
+    --admss-app-light-lavender: #f4ebff;
+
+    --admss-app-statuses-created: #afc6f3;
     --admss-app-statuses-default: #5ed69d;
     --admss-app-statuses-started: #0085ff;
     --admss-app-statuses-in-progress: #0040bd;
@@ -94,10 +111,6 @@ body {
     margin: auto;
 }
 
-.m-r-20px {
-    margin-right: 20px !important;
-}
-
 ::-webkit-scrollbar {
     width: 4px;
 }
@@ -106,11 +119,7 @@ body {
     background: var(--admss-app-medium-blue);
 }
 
-.main.main--collapsed .container {
-    width: calc(var(--admss-app-container-width) - var(--admss-app-aside-expanded-width));
-    max-width: var(--admss-app-container-width-collapsed);
-}
-.main.main--expanded .container {
+.main .container {
     width: calc(var(--admss-app-container-width) - var(--admss-app-aside-collapsed-width));
     max-width: var(--admss-app-container-width-expanded);
 }
